@@ -1,0 +1,87 @@
+/* ─── Google Fonts ─── */
+@import url('https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap');
+
+/* ─── Design Tokens ─── */
+:root {
+  --color-coral:  #FF6B6B;
+  --color-lemon:  #FFE66D;
+  --color-mint:   #6BCB77;
+  --color-sky:    #4ECDC4;
+  --color-ink:    #2D2D2D;
+  --color-cream:  #FFFDF4;
+  --color-paper:  #FFF8E7;
+  --color-shadow: rgba(45, 45, 45, 0.12);
+
+  --dot-grid: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Ccircle cx='1' cy='1' r='1' fill='rgba(45%2C45%2C45%2C0.08)'/%3E%3C/svg%3E");
+}
+
+/* ─── Reset ─── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  font-family: 'Nunito', sans-serif;
+  background: var(--color-cream);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ─── Mapbox patch ─── */
+.mapboxgl-map {
+  font-family: 'Nunito', sans-serif;
+}
+.mapboxgl-ctrl-attrib {
+  font-size: 10px;
+  opacity: 0.5;
+}
+.mapboxgl-ctrl-group {
+  border: 2px solid var(--color-ink) !important;
+  border-radius: 12px !important;
+  box-shadow: 3px 3px 0 var(--color-ink) !important;
+  overflow: hidden;
+}
+.mapboxgl-ctrl-group button {
+  background: var(--color-paper) !important;
+}
+
+/* ─── Pulse ring for active marker ─── */
+.pulse-ring::after {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  border: 3px solid var(--color-coral);
+  border-radius: 50%;
+  animation: pulseRing 1.4s ease-out infinite;
+}
+
+@keyframes pulseRing {
+  0% { transform: scale(1); opacity: 0.8; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+
+/* ─── Global fadeInUp ─── */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Scrollbar ─── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(45,45,45,0.2); border-radius: 3px; }
+
+/* ─── Input / button reset ─── */
+input, textarea, button, select {
+  font-family: inherit;
+}
+
+button { cursor: pointer; }
+a { color: inherit; }
