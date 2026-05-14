@@ -10,6 +10,7 @@ import {
 import { FormsModule } from '@angular/forms';
 import { Step, StepMedia, Enigma } from '../../../types';
 import { environment } from '../../../environments/environment';
+import { assertFileSize, compressImageToDataUrl, readFileAsDataUrl } from '../../lib/media.utils';
 import { EnigmaBlockComponent } from '../enigma-block/enigma-block.component';
 
 interface MapboxFeature {
@@ -102,17 +103,25 @@ interface MapboxFeature {
             (click)="fileRef.click()">
             <span class="drop-icon">📎</span>
             <strong class="drop-label">Glissez ou cliquez pour ajouter</strong>
-            <small class="drop-types">Photos · Vidéos · Fichiers</small>
+            <small class="drop-types">Photos · Vidéos · Audio · PDF</small>
           </div>
-          <input #fileRef type="file" multiple (change)="onFilePick($event)" style="display:none" />
+          <input #fileRef type="file" multiple accept="image/*,video/*,audio/*,.pdf,application/pdf"
+            (change)="onFilePick($event)" style="display:none" />
+          @if (uploadError) {
+            <p class="upload-error">{{ uploadError }}</p>
+          }
           @if (step.media.length > 0) {
             <div class="media-row">
               @for (m of step.media; track m.id) {
                 <div class="media-chip">
                   @if (m.type === 'image') {
                     <img class="media-thumb" [src]="m.url" [alt]="m.name" />
+                  } @else if (m.type === 'video') {
+                    <div class="media-icon-box">🎬</div>
+                  } @else if (m.type === 'audio') {
+                    <div class="media-icon-box">🎵</div>
                   } @else {
-                    <div class="media-icon-box">{{ m.type === 'video' ? '🎬' : '📄' }}</div>
+                    <div class="media-icon-box">📄</div>
                   }
                   <span class="media-name" [title]="m.name">
                     {{ m.name.length > 12 ? m.name.slice(0, 10) + '…' : m.name }}
@@ -296,6 +305,7 @@ interface MapboxFeature {
     .drop-icon { font-size: 22px; }
     .drop-label { font-family: 'Nunito', sans-serif; font-size: 14px; color: var(--color-ink); }
     .drop-types { font-family: 'Nunito', sans-serif; font-size: 11px; color: var(--color-ink); opacity: 0.45; }
+    .upload-error { font-family: 'Nunito', sans-serif; font-weight: 700; font-size: 12px; color: var(--color-coral); margin: 4px 0 0; }
 
     /* ── Media chips ── */
     .media-row { display: flex; flex-wrap: wrap; gap: 10px; }
@@ -352,6 +362,8 @@ export class StepCardComponent implements OnDestroy {
   showDropdown = false;
   searching = false;
   dragging = false;
+  uploadError = '';
+  private uploadErrTimer?: ReturnType<typeof setTimeout>;
 
   private searchTimer?: ReturnType<typeof setTimeout>;
   private lastQuery = '';
@@ -378,6 +390,7 @@ export class StepCardComponent implements OnDestroy {
       title: '',
       description: '',
       answer: { type: 'text', text: '', caseSensitive: false, options: [], mediaAccept: { photo: true, video: true } },
+      points: 100,
     };
     this.patch({ enigmas: [...this.step.enigmas, enigma] });
   }
@@ -457,21 +470,33 @@ export class StepCardComponent implements OnDestroy {
   }
 
   private async processFiles(files: File[]): Promise<void> {
-    const newMedia = await Promise.all(files.map(f => this.toMedia(f)));
-    this.patch({ media: [...this.step.media, ...newMedia] });
+    const results = await Promise.all(files.map(f => this.toMedia(f).catch((e: Error) => {
+      if (e.message === 'FILE_TOO_LARGE') this.showUploadError(f.name);
+      return null;
+    })));
+    const valid = results.filter((m): m is StepMedia => m !== null);
+    if (valid.length) this.patch({ media: [...this.step.media, ...valid] });
   }
 
-  private toMedia(file: File): Promise<StepMedia> {
-    const type: StepMedia['type'] = file.type.startsWith('image/')
-      ? 'image' : file.type.startsWith('video/') ? 'video' : 'file';
+  private async toMedia(file: File): Promise<StepMedia> {
+    assertFileSize(file);
+    const type: StepMedia['type'] = file.type.startsWith('image/') ? 'image'
+      : file.type.startsWith('video/') ? 'video'
+      : file.type.startsWith('audio/') ? 'audio'
+      : 'file';
     if (type === 'file') {
-      return Promise.resolve({ id: this.uid(), type, name: file.name, url: '', size: file.size });
+      return { id: this.uid(), type, name: file.name, url: '', size: file.size };
     }
-    return new Promise(resolve => {
-      const reader = new FileReader();
-      reader.onload = e => resolve({ id: this.uid(), type, name: file.name, url: e.target!.result as string, size: file.size });
-      reader.readAsDataURL(file);
-    });
+    const url = type === 'image'
+      ? await compressImageToDataUrl(file)
+      : await readFileAsDataUrl(file);
+    return { id: this.uid(), type, name: file.name, url, size: file.size };
+  }
+
+  private showUploadError(name: string): void {
+    if (this.uploadErrTimer) clearTimeout(this.uploadErrTimer);
+    this.uploadError = `⚠️ "${name}" dépasse 5 Mo`;
+    this.uploadErrTimer = setTimeout(() => { this.uploadError = ''; }, 3500);
   }
 
   rmMedia(id: string): void {

@@ -1,39 +1,49 @@
 import { Injectable } from '@angular/core';
-import { Hunt, PlayerProgress } from '../../types';
-import { DEMO_HUNT } from '../lib/mock-data';
+import {
+  Hunt,
+  PlayerProgress,
+  Team,
+  AnswerSubmission,
+} from '../../types';
+import { SupabaseService } from './supabase.service';
 
 @Injectable({ providedIn: 'root' })
 export class StorageService {
-  private readonly HUNTS_KEY = 'hunts';
   private readonly LANG_KEY = 'lang_pref';
 
-  getHunts(): Hunt[] {
-    const raw = localStorage.getItem(this.HUNTS_KEY);
-    const stored: Hunt[] = raw ? JSON.parse(raw) : [];
-    const hasDemoHunt = stored.some(h => h.accessCode === 'PARIS1');
-    return hasDemoHunt ? stored : [DEMO_HUNT, ...stored];
+  constructor(private supabase: SupabaseService) {}
+
+  // ── Hunts (Supabase) ──────────────────────────────────────────────
+
+  async getHunts(userId?: string): Promise<Hunt[]> {
+    try { return await this.supabase.getHunts(userId); }
+    catch { return []; }
   }
 
-  saveHunt(hunt: Hunt): void {
-    const hunts = this.getHunts().filter(h => h.id !== 'demo-paris-1');
-    const existing = hunts.findIndex(h => h.id === hunt.id);
-    if (existing >= 0) {
-      hunts[existing] = hunt;
-    } else {
-      hunts.unshift(hunt);
-    }
-    localStorage.setItem(this.HUNTS_KEY, JSON.stringify(hunts));
+  async saveHunt(hunt: Hunt): Promise<void> {
+    try { return await this.supabase.upsertHunt(hunt); }
+    catch (e) { throw e; }
   }
 
-  deleteHunt(id: string): void {
-    const hunts = this.getHunts().filter(h => h.id !== id && h.id !== 'demo-paris-1');
-    localStorage.setItem(this.HUNTS_KEY, JSON.stringify(hunts));
+  async deleteHunt(id: string): Promise<void> {
+    return this.supabase.deleteHunt(id);
   }
 
-  getHuntByCode(code: string): Hunt | null {
-    const all = this.getHunts();
-    return all.find(h => h.accessCode === code.toUpperCase()) ?? null;
+  async getHuntByCode(code: string): Promise<Hunt | null> {
+    try {
+      const byHunt = await this.supabase.getHuntByCode(code);
+      if (byHunt) return byHunt;
+      const byTeam = await this.supabase.getTeamByCode(code);
+      return byTeam ? byTeam.hunt : null;
+    } catch { return null; }
   }
+
+  async getHuntById(id: string): Promise<Hunt | null> {
+    try { return await this.supabase.getHuntById(id); }
+    catch { return null; }
+  }
+
+  // ── Player progress (localStorage — ephemeral session data) ──────
 
   getPlayerProgress(code: string): PlayerProgress | null {
     const raw = localStorage.getItem(`player_${code}`);
@@ -48,6 +58,8 @@ export class StorageService {
     localStorage.removeItem(`player_${code}`);
   }
 
+  // ── Language (localStorage) ───────────────────────────────────────
+
   getLang(): 'fr' | 'en' {
     return (localStorage.getItem(this.LANG_KEY) as 'fr' | 'en') ?? 'fr';
   }
@@ -56,11 +68,57 @@ export class StorageService {
     localStorage.setItem(this.LANG_KEY, lang);
   }
 
+  // ── Rules seen (localStorage) ─────────────────────────────────────
+
   getRulesSeen(code: string): boolean {
     return localStorage.getItem(`rules_seen_${code}`) === 'true';
   }
 
   setRulesSeen(code: string): void {
     localStorage.setItem(`rules_seen_${code}`, 'true');
+  }
+
+  getIntroSeen(code: string): boolean {
+    return localStorage.getItem(`intro_seen_${code}`) === 'true';
+  }
+
+  setIntroSeen(code: string): void {
+    localStorage.setItem(`intro_seen_${code}`, 'true');
+  }
+
+  // ── Teams (Supabase) ──────────────────────────────────────────────
+
+  async getTeamsForHunt(huntId: string): Promise<Team[]> {
+    try { return await this.supabase.getTeamsForHunt(huntId); }
+    catch { return []; }
+  }
+
+  async saveTeamsForHunt(huntId: string, teams: Team[]): Promise<void> {
+    return this.supabase.upsertTeams(huntId, teams);
+  }
+
+  async deleteTeam(_huntId: string, teamId: string): Promise<void> {
+    return this.supabase.deleteTeam(teamId);
+  }
+
+  async getTeamByCode(code: string): Promise<{ team: Team; hunt: Hunt } | null> {
+    try { return await this.supabase.getTeamByCode(code); }
+    catch { return null; }
+  }
+
+  // ── Submissions (Supabase) ────────────────────────────────────────
+
+  async getSubmissions(huntId: string): Promise<AnswerSubmission[]> {
+    try { return await this.supabase.getSubmissions(huntId); }
+    catch { return []; }
+  }
+
+  async saveSubmission(sub: AnswerSubmission): Promise<void> {
+    return this.supabase.upsertSubmission(sub);
+  }
+
+  async getHuntsBatchStats(huntIds: string[]): Promise<Map<string, { teamsPlayed: number; totalAnswers: number }>> {
+    try { return await this.supabase.getHuntsBatchStats(huntIds); }
+    catch { return new Map(); }
   }
 }

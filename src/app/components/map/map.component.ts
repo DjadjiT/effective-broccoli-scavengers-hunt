@@ -23,11 +23,7 @@ import { environment } from '../../../environments/environment';
   imports: [CommonModule],
   template: `<div #mapContainer class="map-container"></div>`,
   styles: [`
-    .map-container {
-      width: 100%;
-      height: 100%;
-      min-height: 300px;
-    }
+    .map-container { width: 100%; height: 100%; min-height: 300px; }
     :host ::ng-deep .mapboxgl-canvas-container { cursor: inherit; }
   `],
 })
@@ -35,8 +31,10 @@ export class MapComponent implements OnInit, AfterViewInit, OnChanges, OnDestroy
   @ViewChild('mapContainer') mapContainer!: ElementRef<HTMLDivElement>;
 
   @Input() steps: Step[] = [];
-  @Input() activeStepIndex = 0;
+  /** Index of the currently highlighted/selected step (-1 = none). */
+  @Input() activeStepIndex = -1;
   @Input() completedStepIds: string[] = [];
+  @Input() pendingStepIds: string[] = [];
   @Input() pickMode = false;
 
   @Output() markerClick = new EventEmitter<number>();
@@ -67,9 +65,8 @@ export class MapComponent implements OnInit, AfterViewInit, OnChanges, OnDestroy
 
   ngOnChanges(changes: SimpleChanges): void {
     if (!this.map || !this.mapLoaded) return;
-    if (changes['steps'] || changes['activeStepIndex'] || changes['completedStepIds']) {
+    if (changes['steps'] || changes['activeStepIndex'] || changes['completedStepIds'] || changes['pendingStepIds']) {
       this.updateMarkers();
-      this.updateRoute();
     }
     if (changes['pickMode']) {
       this.map.getCanvas().style.cursor = this.pickMode ? 'crosshair' : '';
@@ -104,7 +101,6 @@ export class MapComponent implements OnInit, AfterViewInit, OnChanges, OnDestroy
 
     this.map.on('load', () => {
       this.mapLoaded = true;
-      this.initRouteLayer();
       this.updateMarkers();
       this.fitBounds();
     });
@@ -116,56 +112,22 @@ export class MapComponent implements OnInit, AfterViewInit, OnChanges, OnDestroy
     });
   }
 
-  private initRouteLayer(): void {
-    this.map.addSource('route', {
-      type: 'geojson',
-      data: this.buildRouteGeoJSON(),
-    });
-
-    this.map.addLayer({
-      id: 'route-line',
-      type: 'line',
-      source: 'route',
-      layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: {
-        'line-color': '#FF6B6B',
-        'line-width': 3,
-        'line-opacity': 0.55,
-        'line-dasharray': [3, 3],
-      },
-    });
-  }
-
-  private updateRoute(): void {
-    if (!this.mapLoaded) return;
-    const source = this.map.getSource('route');
-    if (source) source.setData(this.buildRouteGeoJSON());
-  }
-
-  private buildRouteGeoJSON(): GeoJSON.Feature<GeoJSON.LineString> {
-    return {
-      type: 'Feature',
-      geometry: {
-        type: 'LineString',
-        coordinates: this.steps.map(s => [s.lng, s.lat]),
-      },
-      properties: {},
-    };
-  }
-
   private updateMarkers(): void {
     this.markers.forEach(m => m.remove());
     this.markers = [];
     if (!this.map || this.steps.length === 0) return;
 
     this.steps.forEach((step, index) => {
-      const isCompleted = this.completedStepIds.includes(step.id);
-      const isActive = index === this.activeStepIndex && !isCompleted;
-      const isLocked = index > this.activeStepIndex && !isCompleted;
+      const isPending = this.pendingStepIds.includes(step.id);
+      const isDone = this.completedStepIds.includes(step.id) && !isPending;
+      const isSelected = index === this.activeStepIndex && !isDone && !isPending;
+      const isClickable = !isDone;
 
-      const color = isCompleted ? '#6BCB77' : isActive ? '#FF6B6B' : '#aaa';
-      const size = isActive ? 48 : 38;
-      const label = isCompleted ? '✓' : isLocked ? '🔒' : String(index + 1);
+      // pending=lemon, done=mint, selected=coral, available=sky
+      const color = isPending ? '#FFE66D' : isDone ? '#6BCB77' : isSelected ? '#FF6B6B' : '#4ECDC4';
+      const size = isSelected ? 48 : 38;
+      const textColor = isPending ? '#2D2D2D' : '#fff';
+      const label = isDone ? '✓' : isPending ? '⏳' : String(index + 1);
 
       const el = document.createElement('div');
       el.style.cssText = [
@@ -177,17 +139,18 @@ export class MapComponent implements OnInit, AfterViewInit, OnChanges, OnDestroy
         'display:flex',
         'align-items:center',
         'justify-content:center',
-        `font-family:"Fredoka One",cursive`,
-        `font-size:${isActive ? 20 : 15}px`,
-        'color:#fff',
+        'font-family:"Fredoka One",cursive',
+        `font-size:${isSelected ? 20 : 15}px`,
+        `color:${textColor}`,
         'box-shadow:3px 3px 0 #2D2D2D',
-        'cursor:pointer',
+        `cursor:${isClickable ? 'pointer' : 'default'}`,
         'position:relative',
         'user-select:none',
+        `opacity:${isDone ? '0.75' : '1'}`,
       ].join(';');
       el.textContent = label;
 
-      if (isActive) {
+      if (isSelected) {
         const ring = document.createElement('div');
         ring.style.cssText = [
           'position:absolute',
@@ -200,10 +163,12 @@ export class MapComponent implements OnInit, AfterViewInit, OnChanges, OnDestroy
         el.appendChild(ring);
       }
 
-      el.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.markerClick.emit(index);
-      });
+      if (isClickable) {
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.markerClick.emit(index);
+        });
+      }
 
       const marker = new this.mapboxgl.Marker({ element: el, anchor: 'center' })
         .setLngLat([step.lng, step.lat])

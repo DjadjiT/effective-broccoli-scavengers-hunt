@@ -46,7 +46,9 @@ export type TranslationKey =
   | 'completionTime'
   | 'hintsUsed'
   | 'shareText'
-  | 'tagline';
+  | 'tagline'
+  | 'score'
+  | 'points';
 
 export const translations: Record<'fr' | 'en', Record<TranslationKey, string>> = {
   fr: {
@@ -98,6 +100,8 @@ export const translations: Record<'fr' | 'en', Record<TranslationKey, string>> =
     hintsUsed: 'Indices utilisés',
     shareText: 'Partagez votre score',
     tagline: 'La chasse au trésor dans votre poche',
+    score: 'Score',
+    points: 'pts',
   },
   en: {
     enterCode: 'Enter your code',
@@ -148,5 +152,7 @@ export const translations: Record<'fr' | 'en', Record<TranslationKey, string>> =
     hintsUsed: 'Hints used',
     shareText: 'Share your score',
     tagline: 'The treasure hunt in your pocket',
+    score: 'Score',
+    points: 'pts',
   },
 };

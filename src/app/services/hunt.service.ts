@@ -20,7 +20,7 @@ export class HuntService {
   }
 
   createEmptyEnigma(): Enigma {
-    return { id: this.generateId(), title: '', description: '', answer: this.createEmptyAnswer() };
+    return { id: this.generateId(), title: '', description: '', answer: this.createEmptyAnswer(), points: 100 };
   }
 
   createEmptyStep(): Step {
@@ -35,26 +35,27 @@ export class HuntService {
     };
   }
 
-  createEmptyHunt(): Hunt {
+  createEmptyHunt(userId: string): Hunt {
     return {
       id: this.generateId(),
       name: '',
       description: '',
-      accessCode: this.generateCode(),
+      accessCode: '',
       steps: [this.createEmptyStep()],
       createdAt: new Date().toISOString(),
       published: false,
+      createdBy: userId,
     };
   }
 
-  publishHunt(hunt: Hunt): Hunt {
+  async publishHunt(hunt: Hunt): Promise<Hunt> {
     const published = { ...hunt, published: true };
-    this.storage.saveHunt(published);
+    await this.storage.saveHunt(published);
     return published;
   }
 
-  saveDraft(hunt: Hunt): void {
-    this.storage.saveHunt(hunt);
+  async saveDraft(hunt: Hunt): Promise<void> {
+    await this.storage.saveHunt(hunt);
   }
 
   checkAnswer(

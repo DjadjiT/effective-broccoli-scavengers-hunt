@@ -1,0 +1,336 @@
+import { Injectable } from '@angular/core';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { environment } from '../../environments/environment';
+import { Hunt, Team, AnswerSubmission, User } from '../../types';
+
+// ── DB row types (snake_case ↔ camelCase) ─────────────────────────────────────
+
+interface DbHunt {
+  id: string;
+  name: string;
+  description: string | null;
+  access_code: string;
+  published: boolean;
+  created_at: string;
+  created_by: string;
+  steps: Hunt['steps'];
+  media: Hunt['media'];
+}
+
+interface DbTeam {
+  id: string;
+  hunt_id: string;
+  name: string;
+  access_code: string;
+  created_at: string;
+}
+
+interface DbSubmission {
+  id: string;
+  hunt_id: string;
+  step_id: string;
+  enigma_id: string;
+  team_id: string;
+  team_name: string;
+  step_title: string;
+  enigma_title: string;
+  type: string;
+  text_value: string;
+  selected_option_ids: string[];
+  media_name: string;
+  submitted_at: string;
+  status: string;
+  points_awarded: number;
+  points_possible: number;
+  reviewed_at: string | null;
+  review_note: string | null;
+}
+
+interface DbProfile {
+  id: string;
+  email: string;
+  name: string;
+  role: 'admin' | 'user';
+  created_at: string;
+}
+
+// ── Mappers ───────────────────────────────────────────────────────────────────
+
+function huntFromDb(row: DbHunt): Hunt {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description ?? undefined,
+    accessCode: row.access_code,
+    published: row.published,
+    createdAt: row.created_at,
+    createdBy: row.created_by,
+    steps: row.steps ?? [],
+    media: row.media ?? [],
+  };
+}
+
+function huntToDb(h: Hunt): DbHunt {
+  return {
+    id: h.id,
+    name: h.name,
+    description: h.description ?? null,
+    access_code: h.accessCode,
+    published: h.published,
+    created_at: h.createdAt,
+    created_by: h.createdBy,
+    steps: h.steps,
+    media: h.media ?? [],
+  };
+}
+
+function teamFromDb(row: DbTeam): Team {
+  return {
+    id: row.id,
+    huntId: row.hunt_id,
+    name: row.name,
+    accessCode: row.access_code,
+    createdAt: row.created_at,
+  };
+}
+
+function teamToDb(t: Team): DbTeam {
+  return {
+    id: t.id,
+    hunt_id: t.huntId,
+    name: t.name,
+    access_code: t.accessCode,
+    created_at: t.createdAt,
+  };
+}
+
+function submissionFromDb(row: DbSubmission): AnswerSubmission {
+  return {
+    id: row.id,
+    huntId: row.hunt_id,
+    stepId: row.step_id,
+    enigmaId: row.enigma_id,
+    teamId: row.team_id,
+    teamName: row.team_name,
+    stepTitle: row.step_title,
+    enigmaTitle: row.enigma_title,
+    type: row.type as AnswerSubmission['type'],
+    textValue: row.text_value,
+    selectedOptionIds: row.selected_option_ids ?? [],
+    mediaName: row.media_name,
+    submittedAt: row.submitted_at,
+    status: row.status as AnswerSubmission['status'],
+    pointsAwarded: row.points_awarded,
+    pointsPossible: row.points_possible,
+    reviewedAt: row.reviewed_at ?? undefined,
+    reviewNote: row.review_note ?? undefined,
+  };
+}
+
+function submissionToDb(s: AnswerSubmission): DbSubmission {
+  return {
+    id: s.id,
+    hunt_id: s.huntId,
+    step_id: s.stepId,
+    enigma_id: s.enigmaId,
+    team_id: s.teamId,
+    team_name: s.teamName,
+    step_title: s.stepTitle,
+    enigma_title: s.enigmaTitle,
+    type: s.type,
+    text_value: s.textValue,
+    selected_option_ids: s.selectedOptionIds,
+    media_name: s.mediaName,
+    submitted_at: s.submittedAt,
+    status: s.status,
+    points_awarded: s.pointsAwarded,
+    points_possible: s.pointsPossible,
+    reviewed_at: s.reviewedAt ?? null,
+    review_note: s.reviewNote ?? null,
+  };
+}
+
+function userFromDb(row: DbProfile): User {
+  return {
+    id: row.id,
+    email: row.email,
+    name: row.name,
+    role: row.role,
+    createdAt: row.created_at,
+  };
+}
+
+// ── Service ───────────────────────────────────────────────────────────────────
+
+@Injectable({ providedIn: 'root' })
+export class SupabaseService {
+  readonly client: SupabaseClient = createClient(
+    environment.supabaseUrl,
+    environment.supabaseKey,
+  );
+
+  // ── Hunts ─────────────────────────────────────────────────────────────────
+
+  async getHunts(userId?: string): Promise<Hunt[]> {
+    let query = this.client
+      .from('hunts')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (userId) query = query.eq('created_by', userId);
+    const { data, error } = await query;
+    if (error) throw error;
+    return (data as DbHunt[]).map(huntFromDb);
+  }
+
+  async getHuntById(id: string): Promise<Hunt | null> {
+    const { data, error } = await this.client
+      .from('hunts')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+    if (error) throw error;
+    return data ? huntFromDb(data as DbHunt) : null;
+  }
+
+  async getHuntByCode(code: string): Promise<Hunt | null> {
+    const { data, error } = await this.client
+      .from('hunts')
+      .select('*')
+      .eq('access_code', code.toUpperCase())
+      .maybeSingle();
+    if (error) throw error;
+    return data ? huntFromDb(data as DbHunt) : null;
+  }
+
+  async upsertHunt(hunt: Hunt): Promise<void> {
+    const { error } = await this.client
+      .from('hunts')
+      .upsert(huntToDb(hunt));
+    if (error) throw error;
+  }
+
+  async deleteHunt(id: string): Promise<void> {
+    const { error } = await this.client
+      .from('hunts')
+      .delete()
+      .eq('id', id);
+    if (error) throw error;
+  }
+
+  // ── Teams ─────────────────────────────────────────────────────────────────
+
+  async getTeamsForHunt(huntId: string): Promise<Team[]> {
+    const { data, error } = await this.client
+      .from('teams')
+      .select('*')
+      .eq('hunt_id', huntId)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    return (data as DbTeam[]).map(teamFromDb);
+  }
+
+  async getTeamByCode(code: string): Promise<{ team: Team; hunt: Hunt } | null> {
+    const { data, error } = await this.client
+      .from('teams')
+      .select('*, hunts(*)')
+      .eq('access_code', code.toUpperCase())
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return null;
+    const row = data as DbTeam & { hunts: DbHunt };
+    return {
+      team: teamFromDb(row),
+      hunt: huntFromDb(row.hunts),
+    };
+  }
+
+  async upsertTeams(huntId: string, teams: Team[]): Promise<void> {
+    // Delete removed teams then upsert current list
+    const { error: delErr } = await this.client
+      .from('teams')
+      .delete()
+      .eq('hunt_id', huntId)
+      .not('id', 'in', `(${teams.map(t => `'${t.id}'`).join(',')})`);
+    if (delErr) throw delErr;
+    if (teams.length === 0) return;
+    const { error } = await this.client
+      .from('teams')
+      .upsert(teams.map(teamToDb));
+    if (error) throw error;
+  }
+
+  async deleteTeam(teamId: string): Promise<void> {
+    const { error } = await this.client
+      .from('teams')
+      .delete()
+      .eq('id', teamId);
+    if (error) throw error;
+  }
+
+  // ── Submissions ───────────────────────────────────────────────────────────
+
+  async getSubmissions(huntId: string): Promise<AnswerSubmission[]> {
+    const { data, error } = await this.client
+      .from('answer_submissions')
+      .select('*')
+      .eq('hunt_id', huntId)
+      .order('submitted_at', { ascending: false });
+    if (error) throw error;
+    return (data as DbSubmission[]).map(submissionFromDb);
+  }
+
+  async getHuntsBatchStats(huntIds: string[]): Promise<Map<string, { teamsPlayed: number; totalAnswers: number }>> {
+    if (huntIds.length === 0) return new Map();
+    const { data, error } = await this.client
+      .from('answer_submissions')
+      .select('hunt_id,team_id')
+      .in('hunt_id', huntIds);
+    if (error) throw error;
+
+    const result = new Map<string, { teamsPlayed: number; totalAnswers: number }>();
+    const teamSets = new Map<string, Set<string>>();
+
+    for (const row of (data ?? []) as { hunt_id: string; team_id: string }[]) {
+      if (!result.has(row.hunt_id)) result.set(row.hunt_id, { teamsPlayed: 0, totalAnswers: 0 });
+      if (!teamSets.has(row.hunt_id)) teamSets.set(row.hunt_id, new Set());
+      result.get(row.hunt_id)!.totalAnswers++;
+      teamSets.get(row.hunt_id)!.add(row.team_id);
+    }
+    for (const [huntId, teamSet] of teamSets) {
+      result.get(huntId)!.teamsPlayed = teamSet.size;
+    }
+    return result;
+  }
+
+  async upsertSubmission(sub: AnswerSubmission): Promise<void> {
+    const { error } = await this.client
+      .from('answer_submissions')
+      .upsert(submissionToDb(sub));
+    if (error) throw error;
+  }
+
+  // ── Profiles ──────────────────────────────────────────────────────────────
+
+  async getProfileById(id: string): Promise<User | null> {
+    const { data, error } = await this.client
+      .from('profiles')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+    if (error) throw error;
+    return data ? userFromDb(data as DbProfile) : null;
+  }
+
+  async upsertProfile(user: User): Promise<void> {
+    const { error } = await this.client
+      .from('profiles')
+      .upsert({
+        id: user.id,
+        email: user.email.toLowerCase(),
+        name: user.name,
+        role: user.role,
+        created_at: user.createdAt,
+      } satisfies DbProfile);
+    if (error) throw error;
+  }
+}

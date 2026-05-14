@@ -1,11 +1,12 @@
 import { Component, Input, Output, EventEmitter } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Enigma, AnswerType, AnswerOption, StepAnswer } from '../../../types';
+import { RichEditorComponent } from '../rich-editor/rich-editor.component';
 
 @Component({
   selector: 'app-enigma-block',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, RichEditorComponent],
   template: `
     <div class="enigma-block">
 
@@ -13,6 +14,14 @@ import { Enigma, AnswerType, AnswerOption, StepAnswer } from '../../../types';
       <div class="eb-header">
         <span class="eb-num">{{ index + 1 }}</span>
         <span class="eb-label">{{ total === 1 ? 'Énigme' : 'Énigme ' + (index + 1) }}</span>
+        <label class="points-badge" title="Points attribués à cette énigme">
+          <span class="pts-icon">⭐</span>
+          <input class="pts-input" type="number" min="0" step="10"
+            [ngModel]="enigma.points"
+            (ngModelChange)="patch({points: $event < 0 ? 0 : +$event})"
+            (click)="$event.stopPropagation()" />
+          <span class="pts-label">pts</span>
+        </label>
         <div class="eb-actions">
           <button class="eb-btn" title="Monter" [disabled]="index === 0"
             (click)="moveUp.emit(); $event.stopPropagation()">↑</button>
@@ -37,10 +46,11 @@ import { Enigma, AnswerType, AnswerOption, StepAnswer } from '../../../types';
       <!-- Description -->
       <div class="field">
         <label class="lbl">📝 Description</label>
-        <textarea class="fi" rows="3"
-          [ngModel]="enigma.description"
-          (ngModelChange)="patch({description: $event})"
-          placeholder="Décrivez l'indice ou la question à résoudre…"></textarea>
+        <app-rich-editor
+          [value]="enigma.description"
+          (valueChange)="patch({description: $event})"
+          placeholder="Décrivez l'indice ou la question à résoudre…">
+        </app-rich-editor>
       </div>
 
       <!-- Answer section -->
@@ -155,7 +165,29 @@ import { Enigma, AnswerType, AnswerOption, StepAnswer } from '../../../types';
       font-weight: 800; font-size: 13px;
       color: var(--color-ink); opacity: 0.6; flex: 1;
     }
-    .eb-actions { display: flex; gap: 4px; margin-left: auto; }
+    /* Points badge */
+    .points-badge {
+      display: flex; align-items: center; gap: 3px;
+      background: var(--color-lemon); border: 2px solid var(--color-ink);
+      border-radius: 20px; padding: 2px 8px 2px 6px;
+      flex-shrink: 0; cursor: text; transition: box-shadow 0.12s;
+    }
+    .points-badge:focus-within { box-shadow: 2px 2px 0 var(--color-ink); }
+    .pts-icon { font-size: 12px; line-height: 1; }
+    .pts-input {
+      width: 40px; border: none; background: transparent;
+      font-family: 'Fredoka One', cursive; font-size: 14px;
+      color: var(--color-ink); text-align: center; outline: none; padding: 0;
+      -moz-appearance: textfield;
+    }
+    .pts-input::-webkit-outer-spin-button,
+    .pts-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    .pts-label {
+      font-family: 'Nunito', sans-serif; font-weight: 800; font-size: 10px;
+      color: var(--color-ink); opacity: 0.65; text-transform: uppercase;
+    }
+
+    .eb-actions { display: flex; gap: 4px; }
     .eb-btn {
       width: 28px; height: 28px;
       border: 2px solid var(--color-ink); border-radius: 8px;

@@ -1,15 +1,18 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, inject, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { RouterModule, Router } from '@angular/router';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { I18nService } from '../../services/i18n.service';
 import { StorageService } from '../../services/storage.service';
 import { HuntService } from '../../services/hunt.service';
-import { Hunt, Step } from '../../../types';
+import { AuthService } from '../../services/auth.service';
+import { Hunt, Step, StepMedia } from '../../../types';
+import { assertFileSize, compressImageToDataUrl, readFileAsDataUrl } from '../../lib/media.utils';
 import { LanguageToggleComponent } from '../../components/language-toggle/language-toggle.component';
 import { MapComponent } from '../../components/map/map.component';
 import { ModalComponent } from '../../components/modal/modal.component';
 import { StepCardComponent } from '../../components/step-card/step-card.component';
+import { RichEditorComponent } from '../../components/rich-editor/rich-editor.component';
 import { environment } from '../../../environments/environment';
 
 @Component({
@@ -23,14 +26,15 @@ import { environment } from '../../../environments/environment';
     MapComponent,
     ModalComponent,
     StepCardComponent,
+    RichEditorComponent,
   ],
   template: `
     <div class="admin-page">
 
       <!-- ── Header ── -->
       <header class="admin-header">
-        <a routerLink="/" class="back-btn">← Accueil</a>
-        <span class="admin-title">🏗️ Admin</span>
+        <a routerLink="/dashboard" class="back-btn">← Tableau de bord</a>
+        <span class="admin-title">🏗️ Éditeur</span>
         <app-language-toggle></app-language-toggle>
       </header>
 
@@ -51,9 +55,42 @@ import { environment } from '../../../environments/environment';
             </div>
             <div class="field">
               <label>{{ i18n.t('description') }}</label>
-              <textarea [(ngModel)]="hunt.description"
-                [placeholder]="i18n.t('description')"
-                class="field-input" rows="2"></textarea>
+              <app-rich-editor
+                [value]="hunt.description ?? ''"
+                (valueChange)="hunt = { ...hunt, description: $event }"
+                placeholder="Décrivez la chasse…">
+              </app-rich-editor>
+            </div>
+
+            <!-- Hunt media -->
+            <div class="field">
+              <label>🖼️ Médias de la chasse <span class="field-hint">(affichés sur la page d'accueil)</span></label>
+              <div class="hunt-drop-zone" (click)="huntFileRef.click()">
+                <span>📎</span>
+                <strong>Cliquez pour ajouter des médias</strong>
+              </div>
+              <input #huntFileRef type="file" multiple
+                accept="image/*,video/*,audio/*,.pdf,application/pdf"
+                (change)="onHuntFilePick($event)" style="display:none" />
+              @if ((hunt.media ?? []).length > 0) {
+                <div class="hunt-media-grid">
+                  @for (m of hunt.media ?? []; track m.id) {
+                    <div class="hunt-media-card">
+                      @if (m.type === 'image') {
+                        <img class="hunt-media-thumb" [src]="m.url" [alt]="m.name" />
+                      } @else if (m.type === 'video') {
+                        <video class="hunt-media-thumb" [src]="m.url" muted></video>
+                      } @else if (m.type === 'audio') {
+                        <div class="hunt-media-icon">🎵<span class="hunt-media-fname">{{ m.name }}</span></div>
+                      } @else {
+                        <div class="hunt-media-icon">📄<span class="hunt-media-fname">{{ m.name }}</span></div>
+                      }
+                      <button class="hunt-media-rm" type="button"
+                        (click)="removeHuntMedia(m.id); $event.stopPropagation()">✕</button>
+                    </div>
+                  }
+                </div>
+              }
             </div>
           </div>
 
@@ -125,30 +162,6 @@ import { environment } from '../../../environments/environment';
             </button>
           </div>
 
-          <!-- Saved hunts list -->
-          <div class="card hunts-list">
-            <h3 class="section-title">📋 {{ i18n.t('savedDrafts') }}</h3>
-            @if (allHunts.length === 0) {
-              <p class="empty">{{ i18n.t('noHunts') }}</p>
-            }
-            @for (h of allHunts; track h.id) {
-              <div class="hunt-row">
-                <div class="hunt-info">
-                  <span class="hunt-name">{{ h.name || 'Sans nom' }}</span>
-                  <span class="hunt-meta">
-                    <code>{{ h.accessCode }}</code>
-                    · {{ h.steps.length }} étapes
-                    · {{ h.published ? '✅ publié' : '📝 brouillon' }}
-                  </span>
-                </div>
-                <div class="hunt-actions">
-                  <button class="btn-sm" (click)="editHunt(h)">✏️</button>
-                  <button class="btn-sm danger" (click)="deleteHunt(h.id)">🗑️</button>
-                </div>
-              </div>
-            }
-          </div>
-
         </section>
 
         <!-- ═══════════════════════════════════════
@@ -180,21 +193,26 @@ import { environment } from '../../../environments/environment';
       </div>
     </div>
 
+    <!-- ── Snackbars ── -->
+    @if (showSaveSnack) {
+      <div class="save-snack">💾 Chasse sauvegardée !</div>
+    }
+    @if (showPublishSnack) {
+      <div class="save-snack save-snack-publish">🚀 Chasse publiée !</div>
+    }
+    @if (snackError) {
+      <div class="save-snack save-snack-error">{{ snackError }}</div>
+    }
+
     <!-- ── Publish modal ── -->
-    <app-modal [visible]="showPublishModal" (close)="showPublishModal = false">
+    <app-modal [visible]="showPublishModal" (close)="onPublishModalClose()">
       <div class="publish-modal">
         <div class="modal-icon">🎉</div>
         <h2>Chasse publiée !</h2>
-        <p>{{ i18n.t('shareCode') }}</p>
-        <div class="code-display">
-          <code>{{ publishedCode }}</code>
-          <button class="btn-copy" (click)="copyCode()">
-            {{ codeCopied ? '✓ ' + i18n.t('codeCopied') : i18n.t('copyCode') }}
-          </button>
-        </div>
+        <p>Créez des équipes depuis le tableau de bord pour partager votre chasse. Chaque équipe recevra son propre code d'accès.</p>
         <div class="modal-actions">
-          <button class="btn-draft" (click)="resetForm()">{{ i18n.t('createAnother') }}</button>
-          <a class="btn-publish" [href]="'/play/' + publishedCode">{{ i18n.t('goToPlay') }}</a>
+          <button class="btn-draft" (click)="returnToDashboard()">Tableau de bord</button>
+          <button class="btn-publish" (click)="goToDetail()">Gérer les équipes →</button>
         </div>
       </div>
     </app-modal>
@@ -352,6 +370,52 @@ import { environment } from '../../../environments/environment';
       box-shadow: 1px 1px 0 var(--color-ink);
     }
 
+    /* ── Hunt media upload ── */
+    .field-hint { font-size: 11px; opacity: 0.55; font-weight: 400; margin-left: 4px; }
+    .hunt-drop-zone {
+      display: flex; align-items: center; justify-content: center; gap: 10px;
+      padding: 18px 16px; margin-top: 6px;
+      border: 2px dashed var(--color-ink); border-radius: 14px;
+      background: var(--color-cream); cursor: pointer;
+      font-family: 'Nunito', sans-serif; font-weight: 700; font-size: 14px;
+      color: var(--color-ink); opacity: 0.7; transition: opacity 0.12s, background 0.12s;
+    }
+    .hunt-drop-zone:hover { opacity: 1; background: var(--color-lemon); }
+    .hunt-media-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+      gap: 10px; margin-top: 10px;
+    }
+    .hunt-media-card {
+      position: relative; border-radius: 12px; overflow: hidden;
+      border: 2px solid var(--color-ink); aspect-ratio: 1 / 1;
+      background: var(--color-cream);
+      box-shadow: 3px 3px 0 var(--color-ink);
+    }
+    .hunt-media-thumb {
+      width: 100%; height: 100%; object-fit: cover; display: block;
+    }
+    .hunt-media-icon {
+      width: 100%; height: 100%;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 4px; padding: 6px; box-sizing: border-box;
+      font-size: 28px; background: var(--color-cream);
+    }
+    .hunt-media-fname {
+      font-family: 'Nunito', sans-serif; font-size: 10px; font-weight: 700;
+      color: var(--color-ink); text-align: center; word-break: break-all;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .hunt-media-rm {
+      position: absolute; top: 4px; right: 4px;
+      width: 22px; height: 22px;
+      background: rgba(255,255,255,0.9); border: 2px solid var(--color-ink);
+      border-radius: 50%; font-size: 10px; font-weight: 900;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      line-height: 1; color: var(--color-ink);
+      transition: background 0.1s;
+    }
+    .hunt-media-rm:hover { background: #FFE3E3; }
+
     /* Pick mode banner */
     .pick-banner {
       display: flex;
@@ -424,35 +488,6 @@ import { environment } from '../../../environments/environment';
       box-shadow: 2px 2px 0 var(--color-ink);
     }
 
-    /* ── Hunts list ── */
-    .hunt-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 12px 0;
-      border-bottom: 1px solid rgba(45,45,45,0.1);
-    }
-    .hunt-info { display: flex; flex-direction: column; gap: 4px; }
-    .hunt-name { font-family: 'Nunito', sans-serif; font-weight: 700; font-size: 15px; }
-    .hunt-meta { font-family: 'Nunito', sans-serif; font-size: 12px; opacity: 0.6; }
-    .hunt-meta code {
-      font-family: 'JetBrains Mono', monospace;
-      background: var(--color-cream);
-      padding: 1px 6px;
-      border-radius: 4px;
-    }
-    .hunt-actions { display: flex; gap: 6px; }
-    .btn-sm {
-      padding: 6px 10px;
-      border: 2px solid var(--color-ink);
-      border-radius: 10px;
-      background: var(--color-cream);
-      cursor: pointer;
-      font-size: 14px;
-    }
-    .btn-sm.danger { border-color: #e03; }
-    .empty { font-family: 'Nunito', sans-serif; opacity: 0.5; }
-
     /* ── Map column ── */
     .map-col { position: sticky; top: 80px; }
     .map-card { height: calc(100vh - 130px); display: flex; flex-direction: column; }
@@ -513,37 +548,71 @@ import { environment } from '../../../environments/environment';
       cursor: pointer;
     }
     .modal-actions { display: flex; gap: 12px; }
+
+    /* ── Save snackbar ── */
+    .save-snack {
+      position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
+      background: var(--color-mint); color: #fff;
+      border: 3px solid var(--color-ink); border-radius: 20px;
+      padding: 12px 28px;
+      font-family: 'Fredoka One', cursive; font-size: 17px;
+      box-shadow: 4px 4px 0 var(--color-ink);
+      z-index: 2000; pointer-events: none; white-space: nowrap;
+      animation: snackIn 0.25s cubic-bezier(0.34,1.56,0.64,1) forwards;
+    }
+    @keyframes snackIn {
+      from { opacity: 0; transform: translateX(-50%) translateY(16px) scale(0.9); }
+      to   { opacity: 1; transform: translateX(-50%) translateY(0)    scale(1); }
+    }
+    .save-snack-publish { background: var(--color-sky); bottom: 76px; }
+    .save-snack-error   { background: var(--color-coral); bottom: 124px; }
   `],
 })
 export class AdminComponent implements OnInit {
-  hunt!: Hunt;
+  readonly i18n = inject(I18nService);
+  private readonly storage = inject(StorageService);
+  private readonly huntService = inject(HuntService);
+  private readonly auth = inject(AuthService);
+  private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
+  private readonly cdr = inject(ChangeDetectorRef);
+
+  hunt: Hunt = this.huntService.createEmptyHunt('');
   activeStep = 0;
   pickModeStepIndex: number | null = null;
   showPublishModal = false;
-  publishedCode = '';
-  codeCopied = false;
-  allHunts: Hunt[] = [];
-
-  constructor(
-    public i18n: I18nService,
-    private storage: StorageService,
-    private huntService: HuntService,
-  ) {}
+  showSaveSnack = false;
+  showPublishSnack = false;
+  snackError = '';
+  private snackTimer?: ReturnType<typeof setTimeout>;
+  private snackPublishTimer?: ReturnType<typeof setTimeout>;
+  private snackErrTimer?: ReturnType<typeof setTimeout>;
 
   ngOnInit(): void {
-    this.resetForm();
-    this.refreshHunts();
+    const huntId = this.route.snapshot.paramMap.get('id');
+    if (huntId && huntId !== 'new') {
+      this.storage.getHuntById(huntId).then(existing => {
+        if (!existing) {
+          this.router.navigate(['/dashboard']);
+          return;
+        }
+        this.hunt = existing;
+        this.activeStep = 0;
+        this.pickModeStepIndex = null;
+        this.showPublishModal = false;
+        this.cdr.markForCheck();
+      });
+    } else {
+      this.resetForm();
+    }
   }
 
   resetForm(): void {
-    this.hunt = this.huntService.createEmptyHunt();
+    const userId = this.auth.user()?.id ?? '';
+    this.hunt = this.huntService.createEmptyHunt(userId);
     this.activeStep = 0;
     this.pickModeStepIndex = null;
     this.showPublishModal = false;
-  }
-
-  refreshHunts(): void {
-    this.allHunts = this.storage.getHunts().filter(h => h.id !== 'demo-paris-1');
   }
 
   // ── Step carousel navigation ──────────────────────────────────────
@@ -635,35 +704,93 @@ export class AdminComponent implements OnInit {
 
   // ── Hunt lifecycle ────────────────────────────────────────────────
 
-  saveDraft(): void {
-    this.huntService.saveDraft(this.hunt);
-    this.refreshHunts();
-  }
-
-  publish(): void {
-    const published = this.huntService.publishHunt(this.hunt);
-    this.publishedCode = published.accessCode;
-    this.showPublishModal = true;
-    this.refreshHunts();
-  }
-
-  copyCode(): void {
-    navigator.clipboard.writeText(this.publishedCode);
-    this.codeCopied = true;
-    setTimeout(() => { this.codeCopied = false; }, 2000);
-  }
-
-  editHunt(hunt: Hunt): void {
-    this.hunt = { ...hunt };
-    this.activeStep = 0;
-    this.pickModeStepIndex = null;
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
-
-  deleteHunt(id: string): void {
-    if (confirm('Supprimer cette chasse ?')) {
-      this.storage.deleteHunt(id);
-      this.refreshHunts();
+  async saveDraft(): Promise<void> {
+    try {
+      await this.huntService.saveDraft(this.hunt);
+      if (this.route.snapshot.paramMap.get('id') === 'new') {
+        this.router.navigate(['/dashboard/hunt', this.hunt.id, 'edit'], { replaceUrl: true });
+      }
+      if (this.snackTimer) clearTimeout(this.snackTimer);
+      this.showSaveSnack = true;
+      this.cdr.markForCheck();
+      this.snackTimer = setTimeout(() => { this.showSaveSnack = false; this.cdr.markForCheck(); }, 2500);
+    } catch {
+      this.showFileError('Erreur lors de la sauvegarde');
     }
+  }
+
+  async publish(): Promise<void> {
+    try {
+      const published = await this.huntService.publishHunt(this.hunt);
+      this.hunt = published;
+      if (this.snackPublishTimer) clearTimeout(this.snackPublishTimer);
+      this.showPublishSnack = true;
+      this.cdr.markForCheck();
+      this.snackPublishTimer = setTimeout(() => { this.showPublishSnack = false; this.cdr.markForCheck(); }, 3000);
+      this.showPublishModal = true;
+    } catch {
+      this.showFileError('Erreur lors de la publication');
+    }
+  }
+
+  onPublishModalClose(): void {
+    this.showPublishModal = false;
+    this.returnToDashboard();
+  }
+
+  returnToDashboard(): void {
+    this.showPublishModal = false;
+    this.router.navigate(['/dashboard']);
+  }
+
+  goToDetail(): void {
+    this.showPublishModal = false;
+    this.router.navigate(['/dashboard/hunt', this.hunt.id]);
+  }
+
+  onHuntFilePick(event: Event): void {
+    const files = Array.from((event.target as HTMLInputElement).files ?? [])
+      .filter(f => f.type.startsWith('image/') || f.type.startsWith('video/')
+        || f.type.startsWith('audio/') || f.type === 'application/pdf');
+    (event.target as HTMLInputElement).value = '';
+    Promise.all(files.map(f => this.fileToMedia(f).catch((e: Error) => {
+      if (e.message === 'FILE_TOO_LARGE') this.showFileError(f.name);
+      return null;
+    }))).then(results => {
+      const valid = results.filter((m): m is StepMedia => m !== null);
+      if (valid.length) {
+        this.hunt = { ...this.hunt, media: [...(this.hunt.media ?? []), ...valid] };
+      }
+      this.cdr.markForCheck();
+    });
+  }
+
+  private async fileToMedia(file: File): Promise<StepMedia> {
+    assertFileSize(file);
+    const type: StepMedia['type'] = file.type.startsWith('image/') ? 'image'
+      : file.type.startsWith('video/') ? 'video'
+      : file.type.startsWith('audio/') ? 'audio'
+      : 'file';
+    const url = type === 'file' ? '' : type === 'image'
+      ? await compressImageToDataUrl(file)
+      : await readFileAsDataUrl(file);
+    return {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      type,
+      name: file.name,
+      url,
+      size: file.size,
+    };
+  }
+
+  private showFileError(name: string): void {
+    if (this.snackErrTimer) clearTimeout(this.snackErrTimer);
+    this.snackError = `⚠️ "${name}" dépasse 5 Mo`;
+    this.cdr.markForCheck();
+    this.snackErrTimer = setTimeout(() => { this.snackError = ''; this.cdr.markForCheck(); }, 3500);
+  }
+
+  removeHuntMedia(id: string): void {
+    this.hunt = { ...this.hunt, media: (this.hunt.media ?? []).filter(m => m.id !== id) };
   }
 }

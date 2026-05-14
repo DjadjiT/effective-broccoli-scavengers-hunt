@@ -1,6 +1,6 @@
 export interface StepMedia {
   id: string;
-  type: 'image' | 'video' | 'file';
+  type: 'image' | 'video' | 'audio' | 'file';
   name: string;
   url: string;
   size: number;
@@ -32,6 +32,7 @@ export interface Enigma {
   title: string;
   description: string;
   answer: StepAnswer;
+  points: number;
 }
 
 export interface Step {
@@ -49,9 +50,11 @@ export interface Hunt {
   name: string;
   description?: string;
   accessCode: string;
+  media?: StepMedia[];
   steps: Step[];
   createdAt: string;
   published: boolean;
+  createdBy: string;
 }
 
 export interface PlayerProgress {
@@ -61,6 +64,58 @@ export interface PlayerProgress {
   startedAt: string;
   completedAt?: string;
   hintsUsed: number;
+  earnedPoints: number;
 }
 
 export type Language = 'fr' | 'en';
+
+// ─────────────────────────────────────────────────────────────
+// Authentication
+// ─────────────────────────────────────────────────────────────
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  role: 'admin' | 'user';
+  createdAt: string;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Submissions / Moderation
+// ─────────────────────────────────────────────────────────────
+
+export type AnswerStatus = 'pending' | 'approved' | 'rejected';
+
+export interface AnswerSubmission {
+  id: string;
+  huntId: string;
+  stepId: string;
+  enigmaId: string;
+  teamId: string;
+  teamName: string;
+  stepTitle: string;
+  enigmaTitle: string;
+  type: AnswerType;
+  textValue: string;
+  selectedOptionIds: string[];
+  mediaName: string;
+  submittedAt: string;
+  status: AnswerStatus;
+  pointsAwarded: number;
+  pointsPossible: number;
+  reviewedAt?: string;
+  reviewNote?: string;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Teams
+// ─────────────────────────────────────────────────────────────
+
+export interface Team {
+  id: string;
+  huntId: string;
+  name: string;
+  accessCode: string;
+  createdAt: string;
+}
