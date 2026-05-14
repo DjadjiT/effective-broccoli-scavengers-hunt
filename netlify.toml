@@ -1,0 +1,12 @@
+[build]
+  command = "npm run build"
+  publish = "dist/scavengers-hunt-front/browser"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# SPA fallback — Angular router gère toutes les routes côté client
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200
