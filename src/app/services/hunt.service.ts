@@ -45,13 +45,25 @@ export class HuntService {
       createdAt: new Date().toISOString(),
       published: false,
       createdBy: userId,
+      status: 'draft',
+      durationSeconds: 0,
+      startedAt: null,
+      finishedAt: null,
     };
   }
 
   async publishHunt(hunt: Hunt): Promise<Hunt> {
-    const published = { ...hunt, published: true };
+    const published = { ...hunt, published: true, status: 'ready' as const };
     await this.storage.saveHunt(published);
     return published;
+  }
+
+  async startHunt(huntId: string): Promise<Hunt> {
+    return this.storage.startHunt(huntId);
+  }
+
+  async finishHunt(huntId: string): Promise<Hunt> {
+    return this.storage.finishHunt(huntId);
   }
 
   async saveDraft(hunt: Hunt): Promise<void> {

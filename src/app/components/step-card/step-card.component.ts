@@ -6,6 +6,8 @@ import {
   OnDestroy,
   ViewChild,
   ElementRef,
+  ChangeDetectorRef,
+  inject,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Step, StepMedia, Enigma } from '../../../types';
@@ -358,6 +360,8 @@ export class StepCardComponent implements OnDestroy {
 
   @ViewChild('fileRef') fileRef!: ElementRef<HTMLInputElement>;
 
+  private readonly cdr = inject(ChangeDetectorRef);
+
   suggestions: MapboxFeature[] = [];
   showDropdown = false;
   searching = false;
@@ -421,11 +425,14 @@ export class StepCardComponent implements OnDestroy {
   }
 
   onAddressFocus(): void {
-    if (this.suggestions.length > 0) this.showDropdown = true;
+    if (this.suggestions.length > 0) {
+      this.showDropdown = true;
+      this.cdr.markForCheck();
+    }
   }
 
   scheduleClose(): void {
-    setTimeout(() => { this.showDropdown = false; }, 200);
+    setTimeout(() => { this.showDropdown = false; this.cdr.markForCheck(); }, 200);
   }
 
   async fetchSuggestions(query: string): Promise<void> {
@@ -438,11 +445,12 @@ export class StepCardComponent implements OnDestroy {
       if (query === this.lastQuery) {
         this.suggestions = data.features ?? [];
         this.showDropdown = this.suggestions.length > 0;
+        this.cdr.markForCheck();
       }
     } catch {
-      if (query === this.lastQuery) this.suggestions = [];
+      if (query === this.lastQuery) { this.suggestions = []; this.cdr.markForCheck(); }
     } finally {
-      if (query === this.lastQuery) this.searching = false;
+      if (query === this.lastQuery) { this.searching = false; this.cdr.markForCheck(); }
     }
   }
 
@@ -451,6 +459,7 @@ export class StepCardComponent implements OnDestroy {
     this.suggestions = [];
     this.showDropdown = false;
     this.searching = false;
+    this.cdr.markForCheck();
   }
 
   // ── File upload ───────────────────────────────────────────────────

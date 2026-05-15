@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
 import { environment } from '../../environments/environment';
-import { Hunt, Team, AnswerSubmission, User } from '../../types';
+import { Hunt, HuntStatus, Team, AnswerSubmission, User } from '../../types';
 
 // ── DB row types (snake_case ↔ camelCase) ─────────────────────────────────────
 
@@ -15,6 +15,10 @@ interface DbHunt {
   created_by: string;
   steps: Hunt['steps'];
   media: Hunt['media'];
+  status: HuntStatus;
+  duration_seconds: number;
+  started_at: string | null;
+  finished_at: string | null;
 }
 
 interface DbTeam {
@@ -67,6 +71,10 @@ function huntFromDb(row: DbHunt): Hunt {
     createdBy: row.created_by,
     steps: row.steps ?? [],
     media: row.media ?? [],
+    status: row.status ?? 'draft',
+    durationSeconds: row.duration_seconds ?? 0,
+    startedAt: row.started_at ?? null,
+    finishedAt: row.finished_at ?? null,
   };
 }
 
@@ -81,6 +89,10 @@ function huntToDb(h: Hunt): DbHunt {
     created_by: h.createdBy,
     steps: h.steps,
     media: h.media ?? [],
+    status: h.status ?? 'draft',
+    duration_seconds: h.durationSeconds ?? 0,
+    started_at: h.startedAt ?? null,
+    finished_at: h.finishedAt ?? null,
   };
 }
 
@@ -260,11 +272,55 @@ export class SupabaseService {
   }
 
   async deleteTeam(teamId: string): Promise<void> {
-    const { error } = await this.client
-      .from('teams')
-      .delete()
-      .eq('id', teamId);
+    await this.client.from('answer_submissions').delete().eq('team_id', teamId);
+    const { error } = await this.client.from('teams').delete().eq('id', teamId);
     if (error) throw error;
+  }
+
+  // ── Hunt lifecycle ────────────────────────────────────────────────────────
+
+  async startHunt(huntId: string): Promise<Hunt> {
+    const { data, error } = await this.client
+      .from('hunts')
+      .update({ status: 'started', started_at: new Date().toISOString() })
+      .eq('id', huntId)
+      .select()
+      .single();
+    if (error) throw error;
+    return huntFromDb(data as DbHunt);
+  }
+
+  async resetHunt(huntId: string): Promise<Hunt> {
+    const { data, error } = await this.client
+      .from('hunts')
+      .update({ status: 'started', started_at: new Date().toISOString(), finished_at: null })
+      .eq('id', huntId)
+      .select()
+      .single();
+    if (error) throw error;
+    return huntFromDb(data as DbHunt);
+  }
+
+  async finishHunt(huntId: string): Promise<Hunt> {
+    const { data, error } = await this.client
+      .from('hunts')
+      .update({ status: 'finished', finished_at: new Date().toISOString() })
+      .eq('id', huntId)
+      .select()
+      .single();
+    if (error) throw error;
+    return huntFromDb(data as DbHunt);
+  }
+
+  subscribeToHunt(huntId: string, onUpdate: (hunt: Hunt) => void): RealtimeChannel {
+    return this.client
+      .channel(`hunt-status:${huntId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'hunts', filter: `id=eq.${huntId}` },
+        (payload) => onUpdate(huntFromDb(payload.new as DbHunt)),
+      )
+      .subscribe();
   }
 
   // ── Submissions ───────────────────────────────────────────────────────────

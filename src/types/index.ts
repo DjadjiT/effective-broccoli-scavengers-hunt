@@ -45,6 +45,8 @@ export interface Step {
   media: StepMedia[];
 }
 
+export type HuntStatus = 'draft' | 'ready' | 'started' | 'finished';
+
 export interface Hunt {
   id: string;
   name: string;
@@ -55,6 +57,10 @@ export interface Hunt {
   createdAt: string;
   published: boolean;
   createdBy: string;
+  status: HuntStatus;
+  durationSeconds: number;
+  startedAt: string | null;
+  finishedAt: string | null;
 }
 
 export interface PlayerProgress {

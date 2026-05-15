@@ -62,6 +62,28 @@ import { environment } from '../../../environments/environment';
               </app-rich-editor>
             </div>
 
+            <!-- Duration -->
+            <div class="field">
+              <label>⏱️ Durée de la chasse <span class="field-hint">(0 = pas de limite)</span></label>
+              <div class="duration-row">
+                <div class="duration-unit">
+                  <input type="number" class="dur-input" min="0" max="99"
+                    [ngModel]="durationH" (ngModelChange)="setDurationH($event)" />
+                  <span class="dur-label">h</span>
+                </div>
+                <div class="duration-unit">
+                  <input type="number" class="dur-input" min="0" max="59"
+                    [ngModel]="durationM" (ngModelChange)="setDurationM($event)" />
+                  <span class="dur-label">min</span>
+                </div>
+                <div class="duration-unit">
+                  <input type="number" class="dur-input" min="0" max="59"
+                    [ngModel]="durationS" (ngModelChange)="setDurationS($event)" />
+                  <span class="dur-label">s</span>
+                </div>
+              </div>
+            </div>
+
             <!-- Hunt media -->
             <div class="field">
               <label>🖼️ Médias de la chasse <span class="field-hint">(affichés sur la page d'accueil)</span></label>
@@ -549,6 +571,43 @@ import { environment } from '../../../environments/environment';
     }
     .modal-actions { display: flex; gap: 12px; }
 
+    /* ── Duration inputs ── */
+    .duration-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .duration-unit {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .dur-input {
+      width: 64px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 16px;
+      font-weight: 700;
+      padding: 8px 10px;
+      border: 2px solid var(--color-ink);
+      border-radius: 10px;
+      background: var(--color-cream);
+      color: var(--color-ink);
+      outline: none;
+      text-align: center;
+      -moz-appearance: textfield;
+    }
+    .dur-input::-webkit-inner-spin-button,
+    .dur-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    .dur-input:focus { border-color: var(--color-sky); box-shadow: 3px 3px 0 var(--color-sky); }
+    .dur-label {
+      font-family: 'Nunito', sans-serif;
+      font-weight: 700;
+      font-size: 13px;
+      color: var(--color-ink);
+      opacity: 0.65;
+      min-width: 24px;
+    }
+
     /* ── Save snackbar ── */
     .save-snack {
       position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
@@ -635,6 +694,7 @@ export class AdminComponent implements OnInit {
     const steps = [...this.hunt.steps];
     steps[index] = updated;
     this.hunt = { ...this.hunt, steps };
+    this.cdr.markForCheck();
   }
 
   addStep(): void {
@@ -681,12 +741,14 @@ export class AdminComponent implements OnInit {
     const steps = [...this.hunt.steps];
     steps[index] = { ...steps[index], lat: coords.lat, lng: coords.lng };
     this.hunt = { ...this.hunt, steps };
+    this.cdr.markForCheck();
 
     // Fill address once reverse geocoding resolves
     const address = await this.reverseGeocode(coords.lat, coords.lng);
     const updatedSteps = [...this.hunt.steps];
     updatedSteps[index] = { ...updatedSteps[index], address };
     this.hunt = { ...this.hunt, steps: updatedSteps };
+    this.cdr.markForCheck();
   }
 
   private async reverseGeocode(lat: number, lng: number): Promise<string> {
@@ -792,5 +854,26 @@ export class AdminComponent implements OnInit {
 
   removeHuntMedia(id: string): void {
     this.hunt = { ...this.hunt, media: (this.hunt.media ?? []).filter(m => m.id !== id) };
+  }
+
+  // ── Duration getters / setters ────────────────────────────────────
+
+  get durationH(): number { return Math.floor((this.hunt.durationSeconds ?? 0) / 3600); }
+  get durationM(): number { return Math.floor(((this.hunt.durationSeconds ?? 0) % 3600) / 60); }
+  get durationS(): number { return (this.hunt.durationSeconds ?? 0) % 60; }
+
+  setDurationH(h: number): void {
+    const v = Math.max(0, Number(h) || 0);
+    this.hunt = { ...this.hunt, durationSeconds: v * 3600 + this.durationM * 60 + this.durationS };
+  }
+
+  setDurationM(m: number): void {
+    const v = Math.max(0, Math.min(59, Number(m) || 0));
+    this.hunt = { ...this.hunt, durationSeconds: this.durationH * 3600 + v * 60 + this.durationS };
+  }
+
+  setDurationS(s: number): void {
+    const v = Math.max(0, Math.min(59, Number(s) || 0));
+    this.hunt = { ...this.hunt, durationSeconds: this.durationH * 3600 + this.durationM * 60 + v };
   }
 }

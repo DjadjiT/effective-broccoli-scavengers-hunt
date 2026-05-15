@@ -44,6 +44,7 @@ export class MapComponent implements OnInit, AfterViewInit, OnChanges, OnDestroy
   private markers: any[] = [];
   private mapboxgl: any;
   private mapLoaded = false;
+  private resizeObserver?: ResizeObserver;
 
   constructor(@Inject(PLATFORM_ID) private platformId: object) {}
 
@@ -74,6 +75,7 @@ export class MapComponent implements OnInit, AfterViewInit, OnChanges, OnDestroy
   }
 
   ngOnDestroy(): void {
+    this.resizeObserver?.disconnect();
     this.markers.forEach(m => m.remove());
     if (this.map) this.map.remove();
   }
@@ -104,6 +106,10 @@ export class MapComponent implements OnInit, AfterViewInit, OnChanges, OnDestroy
       this.updateMarkers();
       this.fitBounds();
     });
+
+    // Recalibrate canvas whenever the container is resized
+    this.resizeObserver = new ResizeObserver(() => this.map?.resize());
+    this.resizeObserver.observe(this.mapContainer.nativeElement);
 
     this.map.on('click', (e: any) => {
       if (this.pickMode) {

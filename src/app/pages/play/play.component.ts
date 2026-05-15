@@ -21,12 +21,12 @@ import {
   AnswerSubmission,
   AnswerStatus,
 } from '../../../types';
-import { LanguageToggleComponent } from '../../components/language-toggle/language-toggle.component';
 import { MapComponent } from '../../components/map/map.component';
 import { ModalComponent } from '../../components/modal/modal.component';
 import { ProgressBarComponent } from '../../components/progress-bar/progress-bar.component';
 import { assertFileSize } from '../../lib/media.utils';
 import { MarkdownPipe } from '../../lib/markdown.pipe';
+import { RealtimeChannel } from '@supabase/supabase-js';
 
 @Component({
   selector: 'app-play',
@@ -35,7 +35,6 @@ import { MarkdownPipe } from '../../lib/markdown.pipe';
     CommonModule,
     FormsModule,
     RouterModule,
-    LanguageToggleComponent,
     MapComponent,
     ModalComponent,
     ProgressBarComponent,
@@ -57,8 +56,14 @@ import { MarkdownPipe } from '../../lib/markdown.pipe';
 
         <header class="play-header">
           <a routerLink="/" class="back-pill">← Accueil</a>
-          <span class="hunt-title-pill">{{ hunt?.name }}</span>
-          <app-language-toggle></app-language-toggle>
+          @if (hunt) {
+            <span class="hunt-title-pill">{{ hunt.name }}</span>
+          }
+          @if (countdownDisplay && hunt?.status === 'started' && !isCompleted) {
+            <span class="countdown-pill-header" [class.countdown-urgent]="countdownUrgent">
+              ⏱ {{ countdownDisplay }}
+            </span>
+          }
         </header>
 
         @if (teamId) {
@@ -80,12 +85,14 @@ import { MarkdownPipe } from '../../lib/markdown.pipe';
 
           <div class="sheet-handle" (click)="sheetExpanded = !sheetExpanded"></div>
 
-          <div class="sheet-content">
+          <div class="sheet-progress">
             <app-progress-bar
               [current]="progress.completedStepIds.length"
               [total]="hunt.steps.length"
             ></app-progress-bar>
+          </div>
 
+          <div class="sheet-content">
             @if (showMyAnswers) {
               <div class="my-answers-panel">
                 <div class="my-answers-header">
@@ -421,9 +428,34 @@ import { MarkdownPipe } from '../../lib/markdown.pipe';
             }
           </div>
 
-          <button class="btn-start-hunt" (click)="startHunt()">
-            🚀 Commencer la chasse
-          </button>
+          @if (waitingForStart) {
+            <div class="waiting-indicator">
+              <div class="wait-dots"><span></span><span></span><span></span></div>
+              <p>En attente du démarrage par l'organisateur…</p>
+            </div>
+          } @else {
+            <button class="btn-start-hunt" (click)="startHunt()">
+              🚀 Commencer la chasse
+            </button>
+          }
+        </div>
+      </div>
+    }
+
+    <!-- Waiting overlay (shown after intro dismissed but hunt not started yet) -->
+    @if (waitingForStart && !showIntro) {
+      <div class="waiting-overlay">
+        <div class="waiting-card">
+          <div class="waiting-icon">⏳</div>
+          <h2>En attente du démarrage</h2>
+          <p>L'organisateur n'a pas encore lancé la chasse.</p>
+          @if (hunt?.name) {
+            <div class="waiting-hunt-name">{{ hunt!.name }}</div>
+          }
+          @if (teamName && teamName !== 'Joueur solo') {
+            <div class="waiting-team-badge">👥 {{ teamName }}</div>
+          }
+          <div class="wait-dots waiting-dots-lg"><span></span><span></span><span></span></div>
         </div>
       </div>
     }
@@ -449,6 +481,11 @@ import { MarkdownPipe } from '../../lib/markdown.pipe';
         <button class="btn-cta" (click)="dismissRules()">{{ i18n.t('rulesGotIt') }}</button>
       </div>
     </app-modal>
+
+    <!-- Status snackbar -->
+    @if (statusSnack) {
+      <div class="status-snack" [ngClass]="statusSnackClass">{{ statusSnack }}</div>
+    }
 
     <!-- Confetti -->
     @if (showConfetti) {
@@ -524,28 +561,51 @@ import { MarkdownPipe } from '../../lib/markdown.pipe';
 
     .play-header {
       position: absolute; top: 0; left: 0; right: 0;
-      display: flex; justify-content: space-between; align-items: center;
-      padding: 12px 16px; z-index: 500; pointer-events: none;
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 12px; z-index: 500; pointer-events: none;
     }
     .play-header > * { pointer-events: all; }
-    .back-pill, .hunt-title-pill {
+    .back-pill {
       background: var(--color-paper); border: 2px solid var(--color-ink);
-      border-radius: 20px; padding: 6px 14px;
+      border-radius: 20px; padding: 6px 12px;
       font-family: 'Nunito', sans-serif; font-weight: 700; font-size: 13px;
       color: var(--color-ink); text-decoration: none; box-shadow: 3px 3px 0 var(--color-ink);
+      flex-shrink: 0;
     }
     .hunt-title-pill {
-      font-family: 'Fredoka One', cursive; font-size: 15px;
-      max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      flex: 1;
+      background: var(--color-paper); border: 2px solid var(--color-ink);
+      border-radius: 20px; padding: 6px 12px;
+      font-family: 'Fredoka One', cursive; font-size: 14px; line-height: 1.25;
+      color: var(--color-ink); box-shadow: 3px 3px 0 var(--color-ink);
+      text-align: center;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .countdown-pill-header {
+      background: var(--color-ink); color: #fff;
+      border: 2px solid rgba(255,255,255,0.15);
+      border-radius: 20px; padding: 6px 12px;
+      font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 13px;
+      letter-spacing: 1px; box-shadow: 3px 3px 0 rgba(0,0,0,0.25);
+      flex-shrink: 0; white-space: nowrap; pointer-events: none;
+    }
+    .countdown-pill-header.countdown-urgent {
+      background: var(--color-coral);
+      animation: urgentPulse 0.8s ease-in-out infinite alternate;
+    }
+    @keyframes urgentPulse {
+      from { opacity: 1; transform: scale(1); }
+      to   { opacity: 0.85; transform: scale(1.04); }
     }
     .team-pill {
-      position: absolute; top: 56px; left: 50%; transform: translateX(-50%);
+      position: absolute; top: 52px; left: 12px;
       background: var(--color-mint); color: #fff;
       border: 2px solid var(--color-ink);
-      border-radius: 20px; padding: 5px 14px;
-      font-family: 'Fredoka One', cursive; font-size: 13px;
-      box-shadow: 3px 3px 0 var(--color-ink); z-index: 500;
-      white-space: nowrap; max-width: calc(100% - 32px);
+      border-radius: 20px; padding: 4px 12px;
+      font-family: 'Fredoka One', cursive; font-size: 12px;
+      box-shadow: 2px 2px 0 var(--color-ink); z-index: 500;
+      white-space: nowrap; max-width: calc(100% - 24px);
       overflow: hidden; text-overflow: ellipsis;
     }
 
@@ -569,6 +629,9 @@ import { MarkdownPipe } from '../../lib/markdown.pipe';
     .sheet-handle {
       width: 40px; height: 4px; background: rgba(45,45,45,0.3);
       border-radius: 2px; margin: 12px auto; cursor: pointer; flex-shrink: 0;
+    }
+    .sheet-progress {
+      padding: 0 20px 8px; flex-shrink: 0;
     }
     .sheet-content {
       padding: 0 20px 20px; overflow-y: auto; flex: 1;
@@ -1153,6 +1216,81 @@ import { MarkdownPipe } from '../../lib/markdown.pipe';
     .lb-name { flex: 1; font-weight: 800; font-size: 14px; color: var(--color-ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .lb-pts { font-family: 'Fredoka One', cursive; font-size: 15px; color: var(--color-coral); white-space: nowrap; }
 
+    /* ── Status snackbar ── */
+    .status-snack {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      padding: 16px 32px;
+      border: 3px solid var(--color-ink); border-radius: 22px;
+      font-family: 'Fredoka One', cursive; font-size: 22px; color: var(--color-ink);
+      box-shadow: 5px 5px 0 var(--color-ink);
+      z-index: 3000; pointer-events: none; white-space: nowrap; text-align: center;
+      animation: snackPop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    }
+    .snack-started  { background: var(--color-mint); color: #fff; border-color: var(--color-ink); }
+    .snack-reset    { background: var(--color-sky);  color: #fff; border-color: var(--color-ink); }
+    .snack-finished { background: var(--color-coral); color: #fff; border-color: var(--color-ink); }
+    @keyframes snackPop {
+      from { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+      to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    }
+
+    /* ── Waiting states ── */
+    .waiting-indicator {
+      display: flex; flex-direction: column; align-items: center; gap: 10px;
+      padding: 20px 16px;
+      background: var(--color-cream); border: 2px solid var(--color-ink);
+      border-radius: 16px; box-shadow: 3px 3px 0 var(--color-ink);
+    }
+    .waiting-indicator p {
+      font-family: 'Nunito', sans-serif; font-size: 14px; font-weight: 700;
+      color: var(--color-ink); opacity: 0.7; margin: 0; text-align: center;
+    }
+    .wait-dots {
+      display: flex; gap: 6px; align-items: center;
+    }
+    .wait-dots span {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--color-sky); animation: dotBounce 1.2s ease-in-out infinite;
+    }
+    .wait-dots span:nth-child(2) { animation-delay: 0.2s; background: var(--color-coral); }
+    .wait-dots span:nth-child(3) { animation-delay: 0.4s; background: var(--color-mint); }
+    @keyframes dotBounce {
+      0%,80%,100% { transform: scale(0.6); opacity: 0.5; }
+      40% { transform: scale(1.2); opacity: 1; }
+    }
+    .waiting-dots-lg span { width: 12px; height: 12px; }
+
+    .waiting-overlay {
+      position: fixed; inset: 0; z-index: 1100;
+      background: var(--color-paper);
+      display: flex; align-items: center; justify-content: center;
+      padding: 24px;
+    }
+    .waiting-card {
+      width: 100%; max-width: 400px;
+      display: flex; flex-direction: column; align-items: center; gap: 20px;
+      text-align: center;
+    }
+    .waiting-icon { font-size: 72px; line-height: 1; }
+    .waiting-card h2 {
+      font-family: 'Fredoka One', cursive; font-size: 28px; color: var(--color-ink); margin: 0;
+    }
+    .waiting-card p {
+      font-family: 'Nunito', sans-serif; font-size: 15px;
+      color: var(--color-ink); opacity: 0.7; margin: 0;
+    }
+    .waiting-hunt-name {
+      font-family: 'Fredoka One', cursive; font-size: 20px; color: var(--color-coral);
+      background: var(--color-cream); border: 2px solid var(--color-ink);
+      border-radius: 14px; padding: 10px 20px; box-shadow: 3px 3px 0 var(--color-ink);
+    }
+    .waiting-team-badge {
+      background: var(--color-mint); color: #fff;
+      border: 2px solid var(--color-ink); border-radius: 20px;
+      padding: 6px 16px; font-family: 'Fredoka One', cursive; font-size: 14px;
+      box-shadow: 2px 2px 0 var(--color-ink);
+    }
+
     .stat { font-family: 'Nunito', sans-serif; font-size: 16px; margin: 0 0 8px; }
     .confetti-container { position: fixed; inset: 0; pointer-events: none; z-index: 2000; overflow: hidden; }
     .confetti-piece { position: absolute; width: 10px; height: 10px; border-radius: 2px; animation: confettiFall 1.5s ease-out forwards; }
@@ -1215,8 +1353,17 @@ export class PlayComponent implements OnInit, OnDestroy {
   teamId = '';
   teamName = 'Joueur solo';
 
+  waitingForStart = false;
+  countdownDisplay = '';
+  countdownUrgent = false;
+  statusSnack = '';
+  statusSnackClass = '';
+
   private confettiTimer?: ReturnType<typeof setTimeout>;
   private toastTimer?: ReturnType<typeof setTimeout>;
+  private countdownInterval?: ReturnType<typeof setInterval>;
+  private statusSnackTimer?: ReturnType<typeof setTimeout>;
+  private realtimeChannel?: RealtimeChannel;
 
   get remaining(): number {
     return (this.hunt?.steps.length ?? 0) - (this.progress?.completedStepIds.length ?? 0);
@@ -1355,6 +1502,57 @@ export class PlayComponent implements OnInit, OnDestroy {
     if (!hunt) { this.router.navigate(['/']); return; }
     this.hunt = hunt;
 
+    // Subscribe to real-time hunt status updates.
+    // Only merge lifecycle fields — steps/name/etc. from the initial load are authoritative
+    // because the Realtime payload may not include large JSONB columns like `steps`.
+    this.realtimeChannel = this.storage.subscribeToHunt(hunt.id, (updated) => {
+      const prevStatus   = this.hunt?.status;
+      const prevDuration = this.hunt?.durationSeconds;
+
+      this.hunt = {
+        ...this.hunt!,
+        status:          updated.status,
+        startedAt:       updated.startedAt,
+        finishedAt:      updated.finishedAt,
+        published:       updated.published,
+        durationSeconds: updated.durationSeconds,
+      };
+
+      if (updated.status === 'started') {
+        const wasWaiting  = this.waitingForStart;
+        const wasFinished = prevStatus === 'finished';
+        if (this.waitingForStart) {
+          this.waitingForStart = false;
+          if (this.showIntro) {
+            this.storage.setIntroSeen(code);
+            this.showIntro = false;
+            if (!this.storage.getRulesSeen(code)) this.showRules = true;
+          }
+        }
+        // Recalculate completion from actual progress (handles timer-reset restart)
+        if (this.progress) {
+          this.isCompleted = this.progress.completedStepIds.length >= (this.hunt?.steps.length ?? 1);
+        }
+        this.startCountdown();
+        if (wasWaiting) {
+          this.showStatusSnack('🚀 La chasse est lancée !', 'snack-started');
+        } else if (wasFinished) {
+          this.showStatusSnack('🔄 La chasse a redémarré !', 'snack-reset');
+        } else {
+          this.showStatusSnack('🔄 Le timer a été réinitialisé !', 'snack-reset');
+        }
+      } else if (updated.status === 'finished') {
+        this.handleHuntFinished(true);
+      } else if (prevStatus === 'started' && updated.durationSeconds !== prevDuration) {
+        // Duration changed while hunt already running — restart countdown silently
+        this.startCountdown();
+      }
+      this.cdr.markForCheck();
+    });
+
+    // Set waiting state if hunt not yet started
+    this.waitingForStart = hunt.status === 'ready';
+
     let progress = this.storage.getPlayerProgress(code);
     if (!progress) {
       progress = {
@@ -1370,19 +1568,85 @@ export class PlayComponent implements OnInit, OnDestroy {
     this.progress = progress;
     this.earnedPoints = progress.earnedPoints ?? 0;
     this.isCompleted = progress.completedStepIds.length >= hunt.steps.length;
+
+    if (hunt.status === 'started') {
+      this.startCountdown();
+    } else if (hunt.status === 'finished') {
+      this.isCompleted = true;
+    }
+
     await this.refreshPendingSubs();
     if (!this.storage.getIntroSeen(code)) {
       this.showIntro = true;
-    } else if (!this.storage.getRulesSeen(code)) {
+    } else if (!this.storage.getRulesSeen(code) && !this.waitingForStart) {
       this.showRules = true;
     }
     this.cdr.markForCheck();
   }
 
+  private startCountdown(): void {
+    if (this.countdownInterval) clearInterval(this.countdownInterval);
+    if (!this.hunt?.durationSeconds || !this.hunt.startedAt) return;
+
+    const tick = () => {
+      if (!this.hunt?.startedAt || !this.hunt.durationSeconds) return;
+      const endMs = new Date(this.hunt.startedAt).getTime() + this.hunt.durationSeconds * 1000;
+      const remainMs = endMs - Date.now();
+      if (remainMs <= 0) {
+        this.countdownDisplay = '00:00:00';
+        this.countdownUrgent = false;
+        clearInterval(this.countdownInterval);
+        this.handleHuntFinished();
+        return;
+      }
+      const totalSec = Math.ceil(remainMs / 1000);
+      const h = Math.floor(totalSec / 3600);
+      const m = Math.floor((totalSec % 3600) / 60);
+      const s = totalSec % 60;
+      this.countdownDisplay = [h, m, s].map(n => String(n).padStart(2, '0')).join(':');
+      this.countdownUrgent = totalSec <= 60;
+      this.cdr.markForCheck();
+    };
+
+    tick();
+    this.countdownInterval = setInterval(tick, 1000);
+  }
+
+  private handleHuntFinished(byAdmin = false): void {
+    if (this.countdownInterval) { clearInterval(this.countdownInterval); this.countdownInterval = undefined; }
+    this.countdownDisplay = '';
+    if (this.hunt) this.hunt = { ...this.hunt, status: 'finished' };
+    if (!this.isCompleted) {
+      this.isCompleted = true;
+      if (this.progress) {
+        const done = { ...this.progress, completedAt: new Date().toISOString(), earnedPoints: this.earnedPoints };
+        this.storage.savePlayerProgress(done);
+        this.progress = done;
+      }
+    }
+    const msg = byAdmin ? '🏁 La chasse a été arrêtée par l\'organisateur.' : '⏰ Temps écoulé ! La chasse est terminée.';
+    this.showStatusSnack(msg, 'snack-finished');
+    this.cdr.markForCheck();
+  }
+
+  private showStatusSnack(msg: string, cssClass: string): void {
+    clearTimeout(this.statusSnackTimer);
+    this.statusSnack = msg;
+    this.statusSnackClass = cssClass;
+    this.cdr.markForCheck();
+    this.statusSnackTimer = setTimeout(() => {
+      this.statusSnack = '';
+      this.cdr.markForCheck();
+    }, 3000);
+  }
+
   ngOnDestroy(): void {
     if (this.confettiTimer) clearTimeout(this.confettiTimer);
     if (this.toastTimer) clearTimeout(this.toastTimer);
+    if (this.countdownInterval) clearInterval(this.countdownInterval);
+    if (this.statusSnackTimer) clearTimeout(this.statusSnackTimer);
     if (this.mediaPreviewUrl) URL.revokeObjectURL(this.mediaPreviewUrl);
+    this.realtimeChannel?.unsubscribe();
   }
 
   dismissRules(): void {

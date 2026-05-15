@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, ChangeDetectorRef } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
@@ -71,6 +71,37 @@ type FilterId = 'all' | AnswerStatus;
                 {{ hunt.published ? 'Repasser en brouillon' : 'Publier' }}
               </button>
             </div>
+
+            <!-- Hunt lifecycle status -->
+            @if (hunt.status !== 'draft') {
+              <div class="status-row status-row-lifecycle">
+                <span class="status-badge" [ngClass]="huntStatusBadgeClass">{{ huntStatusBadgeLabel }}</span>
+                @if (hunt.durationSeconds > 0) {
+                  <span class="duration-badge">⏱ {{ formatDuration(hunt.durationSeconds) }}</span>
+                }
+                @if (countdownDisplay) {
+                  <span class="duration-badge countdown-live" [class.countdown-urgent]="countdownUrgent">⏳ {{ countdownDisplay }}</span>
+                }
+                @if (hunt.status === 'ready') {
+                  <button type="button" class="btn-lifecycle btn-lifecycle-start" (click)="doStartHunt()">
+                    🚀 Lancer la chasse
+                  </button>
+                }
+                @if (hunt.status === 'started') {
+                  <button type="button" class="btn-lifecycle btn-lifecycle-finish" (click)="doFinishHunt()">
+                    🏁 Terminer la chasse
+                  </button>
+                  <button type="button" class="btn-lifecycle btn-lifecycle-reset" (click)="doResetHunt()">
+                    🔄 Redémarrer le timer
+                  </button>
+                }
+                @if (hunt.status === 'finished') {
+                  <button type="button" class="btn-lifecycle btn-lifecycle-reset" (click)="doResetHunt()">
+                    🔄 Redémarrer la chasse
+                  </button>
+                }
+              </div>
+            }
 
             <h2 class="mt">Statistiques</h2>
             <div class="stat-row">
@@ -469,9 +500,39 @@ type FilterId = 'all' | AnswerStatus;
       border-radius: 14px;
       color: var(--color-ink);
     }
-    .status-mint { background: #E3F8E6; }
+    .status-mint  { background: #E3F8E6; }
     .status-lemon { background: var(--color-lemon); }
     .status-coral { background: #FFE3E3; }
+    .status-sky   { background: #DDF6F5; }
+
+    .status-row-lifecycle { margin-top: 8px; }
+    .duration-badge {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700; font-size: 13px;
+      padding: 6px 12px;
+      background: var(--color-cream);
+      border: 2px solid var(--color-ink); border-radius: 14px;
+      color: var(--color-ink);
+    }
+    .countdown-live {
+      font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 15px;
+      background: var(--color-ink); color: #fff;
+      border-color: var(--color-ink); border-radius: 14px;
+      letter-spacing: 1px;
+    }
+    .countdown-live.countdown-urgent { background: var(--color-coral); }
+
+    .btn-lifecycle {
+      font-family: 'Fredoka One', cursive; font-size: 13px;
+      padding: 8px 16px;
+      border: 2px solid var(--color-ink); border-radius: 12px;
+      cursor: pointer; box-shadow: 3px 3px 0 var(--color-ink);
+      transition: transform 0.1s, box-shadow 0.1s;
+    }
+    .btn-lifecycle:hover { transform: translate(-1px,-1px); box-shadow: 4px 4px 0 var(--color-ink); }
+    .btn-lifecycle-start  { background: var(--color-mint);  color: #fff; }
+    .btn-lifecycle-finish { background: var(--color-coral); color: #fff; }
+    .btn-lifecycle-reset  { background: var(--color-sky);   color: #fff; }
     .btn-toggle {
       background: var(--color-lemon);
       border: 2px solid var(--color-ink);
@@ -937,7 +998,7 @@ type FilterId = 'all' | AnswerStatus;
     }
   `],
 })
-export class HuntDetailComponent implements OnInit {
+export class HuntDetailComponent implements OnInit, OnDestroy {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly storage = inject(StorageService);
@@ -963,6 +1024,10 @@ export class HuntDetailComponent implements OnInit {
 
   codeCopied = false;
 
+  countdownDisplay = '';
+  countdownUrgent = false;
+  private countdownInterval?: ReturnType<typeof setInterval>;
+
   ngOnInit(): void {
     const id = this.route.snapshot.paramMap.get('id') ?? '';
     this.storage.getHuntById(id).then(hunt => {
@@ -971,10 +1036,17 @@ export class HuntDetailComponent implements OnInit {
         return;
       }
       this.hunt = hunt;
+      if (hunt.status === 'started') this.startDetailCountdown();
       this.cdr.markForCheck();
       this.refreshTeams();
       this.refreshSubmissions();
     });
+  }
+
+  ngOnDestroy(): void {
+    if (this.countdownInterval) clearInterval(this.countdownInterval);
+    clearTimeout(this.teamSnackTimer);
+    clearTimeout(this.teamSnackErrTimer);
   }
 
   get totalEnigmas(): number {
@@ -1020,6 +1092,85 @@ export class HuntDetailComponent implements OnInit {
     navigator.clipboard.writeText(code);
     this.codeCopied = true;
     setTimeout(() => { this.codeCopied = false; }, 1500);
+  }
+
+  // ── Hunt lifecycle ────────────────────────────────────────────────
+
+  get huntStatusBadgeClass(): string {
+    switch (this.hunt?.status) {
+      case 'ready':    return 'status-sky';
+      case 'started':  return 'status-coral';
+      case 'finished': return 'status-mint';
+      default:         return 'status-lemon';
+    }
+  }
+
+  get huntStatusBadgeLabel(): string {
+    switch (this.hunt?.status) {
+      case 'ready':    return '🟢 Prêt';
+      case 'started':  return '▶ En cours';
+      case 'finished': return '🏁 Terminé';
+      default:         return '📝 Brouillon';
+    }
+  }
+
+  formatDuration(seconds: number): string {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    return [h, m, s].map(n => String(n).padStart(2, '0')).join(':');
+  }
+
+  async doStartHunt(): Promise<void> {
+    if (!this.hunt) return;
+    this.hunt = await this.storage.startHunt(this.hunt.id);
+    this.startDetailCountdown();
+    this.cdr.markForCheck();
+  }
+
+  async doFinishHunt(): Promise<void> {
+    if (!this.hunt) return;
+    this.hunt = await this.storage.finishHunt(this.hunt.id);
+    if (this.countdownInterval) { clearInterval(this.countdownInterval); this.countdownInterval = undefined; }
+    this.countdownDisplay = '';
+    this.cdr.markForCheck();
+  }
+
+  async doResetHunt(): Promise<void> {
+    if (!this.hunt) return;
+    this.hunt = await this.storage.resetHunt(this.hunt.id);
+    this.startDetailCountdown();
+    this.cdr.markForCheck();
+  }
+
+  private startDetailCountdown(): void {
+    if (this.countdownInterval) clearInterval(this.countdownInterval);
+    if (!this.hunt?.durationSeconds || !this.hunt.startedAt) {
+      this.countdownDisplay = '';
+      return;
+    }
+    const tick = () => {
+      if (!this.hunt?.startedAt || !this.hunt.durationSeconds) return;
+      const endMs = new Date(this.hunt.startedAt).getTime() + this.hunt.durationSeconds * 1000;
+      const remainMs = endMs - Date.now();
+      if (remainMs <= 0) {
+        this.countdownDisplay = '00:00:00';
+        this.countdownUrgent = false;
+        clearInterval(this.countdownInterval);
+        this.countdownInterval = undefined;
+        this.cdr.markForCheck();
+        return;
+      }
+      const totalSec = Math.ceil(remainMs / 1000);
+      const h = Math.floor(totalSec / 3600);
+      const m = Math.floor((totalSec % 3600) / 60);
+      const s = totalSec % 60;
+      this.countdownDisplay = [h, m, s].map(n => String(n).padStart(2, '0')).join(':');
+      this.countdownUrgent = totalSec <= 60;
+      this.cdr.markForCheck();
+    };
+    tick();
+    this.countdownInterval = setInterval(tick, 1000);
   }
 
   async togglePublished(): Promise<void> {

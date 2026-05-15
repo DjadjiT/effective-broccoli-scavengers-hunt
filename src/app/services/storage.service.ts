@@ -5,6 +5,7 @@ import {
   Team,
   AnswerSubmission,
 } from '../../types';
+import { RealtimeChannel } from '@supabase/supabase-js';
 import { SupabaseService } from './supabase.service';
 
 @Injectable({ providedIn: 'root' })
@@ -120,5 +121,23 @@ export class StorageService {
   async getHuntsBatchStats(huntIds: string[]): Promise<Map<string, { teamsPlayed: number; totalAnswers: number }>> {
     try { return await this.supabase.getHuntsBatchStats(huntIds); }
     catch { return new Map(); }
+  }
+
+  // ── Hunt lifecycle ────────────────────────────────────────────────
+
+  async startHunt(huntId: string): Promise<Hunt> {
+    return this.supabase.startHunt(huntId);
+  }
+
+  async finishHunt(huntId: string): Promise<Hunt> {
+    return this.supabase.finishHunt(huntId);
+  }
+
+  async resetHunt(huntId: string): Promise<Hunt> {
+    return this.supabase.resetHunt(huntId);
+  }
+
+  subscribeToHunt(huntId: string, onUpdate: (hunt: Hunt) => void): RealtimeChannel {
+    return this.supabase.subscribeToHunt(huntId, onUpdate);
   }
 }
