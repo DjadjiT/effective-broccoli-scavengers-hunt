@@ -8,7 +8,6 @@ import { HuntService } from '../../services/hunt.service';
 import { AuthService } from '../../services/auth.service';
 import { Hunt, Step, StepMedia } from '../../../types';
 import { assertFileSize, compressImageToDataUrl, readFileAsDataUrl } from '../../lib/media.utils';
-import { LanguageToggleComponent } from '../../components/language-toggle/language-toggle.component';
 import { MapComponent } from '../../components/map/map.component';
 import { ModalComponent } from '../../components/modal/modal.component';
 import { StepCardComponent } from '../../components/step-card/step-card.component';
@@ -22,7 +21,6 @@ import { environment } from '../../../environments/environment';
     CommonModule,
     FormsModule,
     RouterModule,
-    LanguageToggleComponent,
     MapComponent,
     ModalComponent,
     StepCardComponent,
@@ -35,7 +33,9 @@ import { environment } from '../../../environments/environment';
       <header class="admin-header">
         <a routerLink="/dashboard" class="back-btn">← Tableau de bord</a>
         <span class="admin-title">🏗️ Éditeur</span>
-        <app-language-toggle></app-language-toggle>
+        <button type="button" class="btn-to-detail" (click)="goToDetail()">
+          Détail →
+        </button>
       </header>
 
       <div class="admin-body">
