@@ -27,12 +27,19 @@ export interface StepAnswer {
   mediaAccept: MediaAccept;
 }
 
+export interface Hint {
+  id: string;
+  text: string;
+  unlockAfterAttempts: number;
+}
+
 export interface Enigma {
   id: string;
   title: string;
   description: string;
   answer: StepAnswer;
   points: number;
+  hints?: Hint[];
 }
 
 export interface Step {
@@ -51,7 +58,6 @@ export interface Hunt {
   id: string;
   name: string;
   description?: string;
-  accessCode: string;
   media?: StepMedia[];
   steps: Step[];
   createdAt: string;

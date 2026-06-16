@@ -18,6 +18,7 @@ import {
   PlayerProgress,
   Step,
   Enigma,
+  Hint,
   AnswerSubmission,
   AnswerStatus,
 } from '../../../types';
@@ -245,6 +246,18 @@ import { RealtimeChannel } from '@supabase/supabase-js';
                 }
 
                 <div class="enigma-text md-render" [innerHTML]="enigma?.description | md"></div>
+
+                <!-- Unlocked hints -->
+                @if (enigma && getUnlockedHints(enigma).length > 0) {
+                  <div class="hints-section">
+                    @for (hint of getUnlockedHints(enigma); track hint.id; let i = $index) {
+                      <div class="hint-card">
+                        <span class="hint-label">💡 Indice {{ i + 1 }}</span>
+                        <p class="hint-text">{{ hint.text }}</p>
+                      </div>
+                    }
+                  </div>
+                }
 
                 <div [class.shake-answer]="shakeAnswer">
 
@@ -698,6 +711,26 @@ import { RealtimeChannel } from '@supabase/supabase-js';
     .md-render code { font-family: monospace; background: rgba(45,45,45,0.08); padding: 1px 4px; border-radius: 4px; }
     .md-render blockquote { border-left: 3px solid var(--color-coral); margin: 0.3em 0; padding: 2px 10px; }
     .md-render ::ng-deep img, .md-render ::ng-deep video { width: 100%; height: auto; display: block; border-radius: 8px; }
+
+    /* Hints */
+    .hints-section { display: flex; flex-direction: column; gap: 8px; }
+    .hint-card {
+      display: flex; flex-direction: column; gap: 4px;
+      padding: 10px 14px;
+      background: #FFFBE0;
+      border: 2px solid var(--color-ink);
+      border-left: 4px solid var(--color-lemon);
+      border-radius: 12px;
+      box-shadow: 2px 2px 0 var(--color-ink);
+    }
+    .hint-label {
+      font-family: 'Fredoka One', cursive; font-size: 13px;
+      color: var(--color-ink);
+    }
+    .hint-text {
+      font-family: 'Nunito', sans-serif; font-size: 14px; line-height: 1.5;
+      color: var(--color-ink); margin: 0;
+    }
 
     /* Answer inputs */
     .answer-row { display: flex; gap: 8px; }
@@ -1326,6 +1359,7 @@ export class PlayComponent implements OnInit, OnDestroy {
   mediaPreviewUrl = '';
   mediaUrl = '';
 
+  wrongAttemptCounts: Map<string, number> = new Map();
   pendingSubsByEnigmaId: Map<string, AnswerSubmission> = new Map();
   sessionPendingEnigmaIds: Set<string> = new Set(); // media only — not pre-loaded from storage
   editingPendingEnigmaIds: Set<string> = new Set();
@@ -1421,6 +1455,12 @@ export class PlayComponent implements OnInit, OnDestroy {
       .map(s => s.id);
   }
 
+  getUnlockedHints(enigma: Enigma): Hint[] {
+    if (!enigma.hints?.length) return [];
+    const attempts = this.wrongAttemptCounts.get(enigma.id) ?? 0;
+    return enigma.hints.filter(h => attempts >= h.unlockAfterAttempts);
+  }
+
   isEnigmaPending(enigmaId: string, type = ''): boolean {
     if (type === 'media') return this.sessionPendingEnigmaIds.has(enigmaId);
     return this.pendingSubsByEnigmaId.has(enigmaId);
@@ -1489,17 +1529,12 @@ export class PlayComponent implements OnInit, OnDestroy {
 
   private async initPlay(code: string): Promise<void> {
     const teamMatch = await this.storage.getTeamByCode(code);
-    let hunt: Hunt | null = null;
 
-    if (teamMatch) {
-      this.teamId = teamMatch.team.id;
-      this.teamName = teamMatch.team.name;
-      hunt = teamMatch.hunt;
-    } else {
-      hunt = await this.storage.getHuntByCode(code);
-    }
+    if (!teamMatch) { this.router.navigate(['/']); return; }
 
-    if (!hunt) { this.router.navigate(['/']); return; }
+    this.teamId = teamMatch.team.id;
+    this.teamName = teamMatch.team.name;
+    const hunt: Hunt = teamMatch.hunt;
     this.hunt = hunt;
 
     // Subscribe to real-time hunt status updates.
@@ -1576,6 +1611,7 @@ export class PlayComponent implements OnInit, OnDestroy {
     }
 
     await this.refreshPendingSubs();
+    this.wrongAttemptCounts = await this.storage.getAttemptCounts(hunt.id, this.teamId || 'solo');
     if (!this.storage.getIntroSeen(code)) {
       this.showIntro = true;
     } else if (!this.storage.getRulesSeen(code) && !this.waitingForStart) {
@@ -1652,7 +1688,7 @@ export class PlayComponent implements OnInit, OnDestroy {
   dismissRules(): void {
     this.showRules = false;
     if (this.hunt) {
-      const code = this.route.snapshot.paramMap.get('code') ?? this.hunt.accessCode;
+      const code = this.route.snapshot.paramMap.get('code') ?? '';
       this.storage.setRulesSeen(code);
     }
   }
@@ -1864,10 +1900,20 @@ export class PlayComponent implements OnInit, OnDestroy {
     }
   }
 
-  private handleWrong(): void {
+  private async handleWrong(): Promise<void> {
     this.wrongAnswer = true;
     this.shakeAnswer = true;
     setTimeout(() => { this.shakeAnswer = false; this.cdr.markForCheck(); }, 500);
+
+    const step = this.hunt?.steps[this.selectedStepIndex];
+    const enigma = step?.enigmas?.[this.currentEnigmaIndex];
+    if (this.hunt && enigma) {
+      const newCount = await this.storage.incrementWrongAttempt(
+        this.hunt.id, enigma.id, this.teamId || 'solo',
+      );
+      this.wrongAttemptCounts.set(enigma.id, newCount);
+      this.cdr.markForCheck();
+    }
   }
 
   private async handlePending(step: Step, enigma: Enigma): Promise<void> {

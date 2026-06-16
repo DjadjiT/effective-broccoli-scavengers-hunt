@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { StorageService } from '../../../services/storage.service';
-import { Hunt, Team, AnswerSubmission, AnswerStatus } from '../../../../types';
+import { Hunt, Hint, Team, AnswerSubmission, AnswerStatus } from '../../../../types';
 import { DashNavComponent } from '../../../components/dash-nav/dash-nav.component';
 import { MarkdownPipe } from '../../../lib/markdown.pipe';
 
@@ -123,9 +123,11 @@ type FilterId = 'all' | AnswerStatus;
               <button type="button" class="btn-action btn-edit" (click)="goToEdit()">
                 ✏️ Modifier les étapes
               </button>
-              <button type="button" class="btn-action btn-play" (click)="goToPlay()">
-                ▶ Voir en tant que joueur
-              </button>
+              @if (teams.length > 0) {
+                <button type="button" class="btn-action btn-play" (click)="goToPlay()">
+                  ▶ Voir en tant que joueur
+                </button>
+              }
             </div>
           </section>
         }
@@ -302,6 +304,9 @@ type FilterId = 'all' | AnswerStatus;
                         <span class="meta-date">📅 {{ formatDateTime(s.submittedAt) }}</span>
                         @if (s.reviewedAt) {
                           <span class="meta-date">🔍 {{ formatDateTime(s.reviewedAt) }}</span>
+                        }
+                        @if (getUnlockedHintsForSub(s).length > 0) {
+                          <span class="meta-pill meta-hint">💡 {{ getUnlockedHintsForSub(s).length }} indice(s) débloqué(s)</span>
                         }
                       </div>
                       @if (s.reviewNote) {
@@ -882,6 +887,7 @@ type FilterId = 'all' | AnswerStatus;
       border-radius: 10px;
       border: 2px solid var(--color-ink);
     }
+    .meta-hint { background: #FFFBE0; }
     .meta-date {
       font-family: 'Nunito', sans-serif;
       font-size: 12px;
@@ -1018,6 +1024,7 @@ export class HuntDetailComponent implements OnInit, OnDestroy {
   private teamSnackErrTimer?: ReturnType<typeof setTimeout>;
 
   submissions: AnswerSubmission[] = [];
+  attemptCounts: Map<string, number> = new Map();
   filter: FilterId = 'all';
   pointsDraft: Record<string, number> = {};
   notesDraft: Record<string, string> = {};
@@ -1188,7 +1195,9 @@ export class HuntDetailComponent implements OnInit, OnDestroy {
 
   goToPlay(): void {
     if (!this.hunt) return;
-    this.router.navigate(['/play', this.hunt.accessCode]);
+    const firstTeam = this.teams[0];
+    if (!firstTeam) return;
+    this.router.navigate(['/play', firstTeam.accessCode]);
   }
 
   // ── Teams ─────────────────────────────────────────────────────────
@@ -1284,7 +1293,10 @@ export class HuntDetailComponent implements OnInit, OnDestroy {
 
   async refreshSubmissions(): Promise<void> {
     if (!this.hunt) return;
-    this.submissions = await this.storage.getSubmissions(this.hunt.id);
+    [this.submissions, this.attemptCounts] = await Promise.all([
+      this.storage.getSubmissions(this.hunt.id),
+      this.storage.getAllAttemptCounts(this.hunt.id),
+    ]);
     for (const s of this.submissions) {
       if (this.pointsDraft[s.id] === undefined) {
         this.pointsDraft[s.id] = s.pointsAwarded > 0 ? s.pointsAwarded : s.pointsPossible;
@@ -1294,6 +1306,16 @@ export class HuntDetailComponent implements OnInit, OnDestroy {
       }
     }
     this.cdr.markForCheck();
+  }
+
+  getUnlockedHintsForSub(sub: AnswerSubmission): Hint[] {
+    if (!this.hunt) return [];
+    const wrongCount = this.attemptCounts.get(`${sub.teamId}:${sub.enigmaId}`) ?? 0;
+    for (const step of this.hunt.steps) {
+      const enigma = step.enigmas.find(e => e.id === sub.enigmaId);
+      if (enigma) return (enigma.hints ?? []).filter(h => wrongCount >= h.unlockAfterAttempts);
+    }
+    return [];
   }
 
   typeIcon(type: string): string {
@@ -1372,6 +1394,10 @@ export class HuntDetailComponent implements OnInit, OnDestroy {
       reviewNote: this.notesDraft[sub.id]?.trim() || undefined,
     };
     await this.storage.saveSubmission(updated);
+    // Text and media wrong attempts are tracked when admin rejects
+    if (sub.type === 'text' || sub.type === 'media') {
+      await this.storage.incrementWrongAttempt(sub.huntId, sub.enigmaId, sub.teamId);
+    }
     await this.refreshSubmissions();
   }
 }

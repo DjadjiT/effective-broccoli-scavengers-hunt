@@ -2,7 +2,6 @@ import { Component, OnInit, inject, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, RouterModule } from '@angular/router';
 import { StorageService } from '../../services/storage.service';
-import { HuntService } from '../../services/hunt.service';
 import { AuthService } from '../../services/auth.service';
 import { Hunt } from '../../../types';
 import { DashNavComponent } from '../../components/dash-nav/dash-nav.component';
@@ -79,10 +78,6 @@ import { DashNavComponent } from '../../components/dash-nav/dash-nav.component';
                 </div>
 
                 <div class="card-meta">
-                  <div class="meta-item">
-                    <span class="meta-label">Code</span>
-                    <code class="meta-code">{{ h.accessCode }}</code>
-                  </div>
                   <div class="meta-item">
                     <span class="meta-label">Étapes</span>
                     <span class="meta-val">{{ h.steps.length }}</span>
@@ -326,16 +321,6 @@ import { DashNavComponent } from '../../components/dash-nav/dash-nav.component';
       text-transform: uppercase;
       letter-spacing: 0.3px;
     }
-    .meta-code {
-      font-family: 'JetBrains Mono', monospace;
-      font-weight: 700;
-      font-size: 13px;
-      color: var(--color-coral);
-      background: rgba(255,107,107,0.08);
-      padding: 1px 6px;
-      border-radius: 4px;
-      width: fit-content;
-    }
     .meta-val {
       font-family: 'Nunito', sans-serif;
       font-weight: 800;
@@ -426,7 +411,6 @@ import { DashNavComponent } from '../../components/dash-nav/dash-nav.component';
 })
 export class DashboardComponent implements OnInit {
   private readonly storage = inject(StorageService);
-  private readonly huntService = inject(HuntService);
   private readonly auth = inject(AuthService);
   private readonly router = inject(Router);
   private readonly cdr = inject(ChangeDetectorRef);

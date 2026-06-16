@@ -9,7 +9,6 @@ interface DbHunt {
   id: string;
   name: string;
   description: string | null;
-  access_code: string;
   published: boolean;
   created_at: string;
   created_by: string;
@@ -65,7 +64,6 @@ function huntFromDb(row: DbHunt): Hunt {
     id: row.id,
     name: row.name,
     description: row.description ?? undefined,
-    accessCode: row.access_code,
     published: row.published,
     createdAt: row.created_at,
     createdBy: row.created_by,
@@ -83,7 +81,6 @@ function huntToDb(h: Hunt): DbHunt {
     id: h.id,
     name: h.name,
     description: h.description ?? null,
-    access_code: h.accessCode,
     published: h.published,
     created_at: h.createdAt,
     created_by: h.createdBy,
@@ -199,16 +196,6 @@ export class SupabaseService {
       .from('hunts')
       .select('*')
       .eq('id', id)
-      .maybeSingle();
-    if (error) throw error;
-    return data ? huntFromDb(data as DbHunt) : null;
-  }
-
-  async getHuntByCode(code: string): Promise<Hunt | null> {
-    const { data, error } = await this.client
-      .from('hunts')
-      .select('*')
-      .eq('access_code', code.toUpperCase())
       .maybeSingle();
     if (error) throw error;
     return data ? huntFromDb(data as DbHunt) : null;
@@ -363,6 +350,56 @@ export class SupabaseService {
       .from('answer_submissions')
       .upsert(submissionToDb(sub));
     if (error) throw error;
+  }
+
+  // ── Enigma attempts ───────────────────────────────────────────────────────
+
+  async incrementWrongAttempt(huntId: string, enigmaId: string, teamId: string): Promise<number> {
+    const { data: existing } = await this.client
+      .from('enigma_attempts')
+      .select('wrong_count')
+      .eq('hunt_id', huntId)
+      .eq('enigma_id', enigmaId)
+      .eq('team_id', teamId)
+      .maybeSingle();
+
+    const newCount = ((existing as { wrong_count: number } | null)?.wrong_count ?? 0) + 1;
+
+    const { error } = await this.client
+      .from('enigma_attempts')
+      .upsert({ hunt_id: huntId, enigma_id: enigmaId, team_id: teamId, wrong_count: newCount, updated_at: new Date().toISOString() });
+
+    if (error) throw error;
+    return newCount;
+  }
+
+  async getAttemptCounts(huntId: string, teamId: string): Promise<Map<string, number>> {
+    const { data, error } = await this.client
+      .from('enigma_attempts')
+      .select('enigma_id, wrong_count')
+      .eq('hunt_id', huntId)
+      .eq('team_id', teamId);
+
+    if (error) throw error;
+    const map = new Map<string, number>();
+    for (const row of (data ?? []) as { enigma_id: string; wrong_count: number }[]) {
+      map.set(row.enigma_id, row.wrong_count);
+    }
+    return map;
+  }
+
+  async getAllAttemptCounts(huntId: string): Promise<Map<string, number>> {
+    const { data, error } = await this.client
+      .from('enigma_attempts')
+      .select('enigma_id, team_id, wrong_count')
+      .eq('hunt_id', huntId);
+
+    if (error) throw error;
+    const map = new Map<string, number>();
+    for (const row of (data ?? []) as { enigma_id: string; team_id: string; wrong_count: number }[]) {
+      map.set(`${row.team_id}:${row.enigma_id}`, row.wrong_count);
+    }
+    return map;
   }
 
   // ── Profiles ──────────────────────────────────────────────────────────────

@@ -30,15 +30,6 @@ export class StorageService {
     return this.supabase.deleteHunt(id);
   }
 
-  async getHuntByCode(code: string): Promise<Hunt | null> {
-    try {
-      const byHunt = await this.supabase.getHuntByCode(code);
-      if (byHunt) return byHunt;
-      const byTeam = await this.supabase.getTeamByCode(code);
-      return byTeam ? byTeam.hunt : null;
-    } catch { return null; }
-  }
-
   async getHuntById(id: string): Promise<Hunt | null> {
     try { return await this.supabase.getHuntById(id); }
     catch { return null; }
@@ -120,6 +111,22 @@ export class StorageService {
 
   async getHuntsBatchStats(huntIds: string[]): Promise<Map<string, { teamsPlayed: number; totalAnswers: number }>> {
     try { return await this.supabase.getHuntsBatchStats(huntIds); }
+    catch { return new Map(); }
+  }
+
+  // ── Enigma attempts ──────────────────────────────────────────────
+
+  async incrementWrongAttempt(huntId: string, enigmaId: string, teamId: string): Promise<number> {
+    return this.supabase.incrementWrongAttempt(huntId, enigmaId, teamId);
+  }
+
+  async getAttemptCounts(huntId: string, teamId: string): Promise<Map<string, number>> {
+    try { return await this.supabase.getAttemptCounts(huntId, teamId); }
+    catch { return new Map(); }
+  }
+
+  async getAllAttemptCounts(huntId: string): Promise<Map<string, number>> {
+    try { return await this.supabase.getAllAttemptCounts(huntId); }
     catch { return new Map(); }
   }
 

@@ -6,11 +6,6 @@ import { StorageService } from './storage.service';
 export class HuntService {
   constructor(private storage: StorageService) {}
 
-  generateCode(): string {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-  }
-
   generateId(): string {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   }
@@ -40,7 +35,6 @@ export class HuntService {
       id: this.generateId(),
       name: '',
       description: '',
-      accessCode: '',
       steps: [this.createEmptyStep()],
       createdAt: new Date().toISOString(),
       published: false,

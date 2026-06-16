@@ -1,6 +1,6 @@
 import { Component, Input, Output, EventEmitter } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Enigma, AnswerType, AnswerOption, StepAnswer } from '../../../types';
+import { Enigma, AnswerType, AnswerOption, StepAnswer, Hint } from '../../../types';
 import { RichEditorComponent } from '../rich-editor/rich-editor.component';
 
 @Component({
@@ -131,6 +131,32 @@ import { RichEditorComponent } from '../rich-editor/rich-editor.component';
             </div>
           </div>
         }
+      </div>
+
+      <!-- Hints section -->
+      <div class="field">
+        <label class="lbl">💡 Indices (optionnel)</label>
+        @for (hint of (enigma.hints ?? []); track hint.id; let i = $index) {
+          <div class="hint-row">
+            <span class="hint-num">{{ i + 1 }}</span>
+            <input class="fi hint-text" type="text"
+              [ngModel]="hint.text"
+              (ngModelChange)="updateHint(hint.id, { text: $event })"
+              [placeholder]="'Indice ' + (i + 1)" />
+            <div class="hint-threshold">
+              <span class="hint-after">après</span>
+              <input class="hint-count-input" type="number" min="1" step="1"
+                [ngModel]="hint.unlockAfterAttempts"
+                (ngModelChange)="updateHint(hint.id, { unlockAfterAttempts: $event < 1 ? 1 : +$event })" />
+              <span class="hint-after">erreurs</span>
+            </div>
+            <button class="btn-rm-opt" title="Supprimer cet indice"
+              (click)="removeHint(hint.id); $event.stopPropagation()">✕</button>
+          </div>
+        }
+        <button class="btn-add-opt" (click)="addHint(); $event.stopPropagation()">
+          + Ajouter un indice
+        </button>
       </div>
 
     </div>
@@ -284,6 +310,36 @@ import { RichEditorComponent } from '../rich-editor/rich-editor.component';
     }
     .btn-add-opt:hover { border-color: var(--color-mint); color: var(--color-mint); opacity: 1; }
 
+    /* Hints */
+    .hint-row {
+      display: flex; align-items: center; gap: 6px; flex-wrap: nowrap;
+    }
+    .hint-num {
+      width: 22px; height: 22px; flex-shrink: 0;
+      background: var(--color-lemon); border: 2px solid var(--color-ink);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-family: 'Fredoka One', cursive; font-size: 11px; color: var(--color-ink);
+    }
+    .hint-text { flex: 1; min-width: 0; padding: 8px 10px; font-size: 13px; }
+    .hint-threshold {
+      display: flex; align-items: center; gap: 4px; flex-shrink: 0;
+    }
+    .hint-after {
+      font-family: 'Nunito', sans-serif; font-size: 11px; font-weight: 700;
+      color: var(--color-ink); opacity: 0.6; white-space: nowrap;
+    }
+    .hint-count-input {
+      width: 46px; padding: 6px 4px; text-align: center;
+      font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700;
+      border: 2px solid var(--color-ink); border-radius: 8px;
+      background: var(--color-paper); outline: none;
+      -moz-appearance: textfield;
+    }
+    .hint-count-input::-webkit-outer-spin-button,
+    .hint-count-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    .hint-count-input:focus { border-color: var(--color-sky); }
+
     /* Media config */
     .media-config {
       background: rgba(78,205,196,0.06);
@@ -359,6 +415,21 @@ export class EnigmaBlockComponent {
   toggleMediaAccept(field: 'photo' | 'video'): void {
     this.patchAnswer({
       mediaAccept: { ...this.enigma.answer.mediaAccept, [field]: !this.enigma.answer.mediaAccept[field] },
+    });
+  }
+
+  addHint(): void {
+    const hint: Hint = { id: this.uid(), text: '', unlockAfterAttempts: 3 };
+    this.patch({ hints: [...(this.enigma.hints ?? []), hint] });
+  }
+
+  removeHint(id: string): void {
+    this.patch({ hints: (this.enigma.hints ?? []).filter(h => h.id !== id) });
+  }
+
+  updateHint(id: string, partial: Partial<Hint>): void {
+    this.patch({
+      hints: (this.enigma.hints ?? []).map(h => h.id === id ? { ...h, ...partial } : h),
     });
   }
 

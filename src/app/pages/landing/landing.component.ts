@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
@@ -158,12 +158,6 @@ import { LanguageToggleComponent } from '../../components/language-toggle/langua
         <p>© {{ year }} ScavengerHunt · Conçu avec 🧡</p>
       </footer>
 
-      @if (showDemoBadge) {
-        <div class="demo-badge" (click)="tryDemo()">
-          🎮 Essayez PARIS1
-          <button type="button" class="badge-close" (click)="dismissDemo($event)">×</button>
-        </div>
-      }
     </div>
   `,
   styles: [`
@@ -575,7 +569,7 @@ import { LanguageToggleComponent } from '../../components/language-toggle/langua
     }
   `],
 })
-export class LandingComponent implements OnInit {
+export class LandingComponent {
   readonly auth = inject(AuthService);
   readonly i18n = inject(I18nService);
   private readonly storage = inject(StorageService);
@@ -584,12 +578,7 @@ export class LandingComponent implements OnInit {
   code = '';
   errorMsg = '';
   shakeInput = false;
-  showDemoBadge = false;
   readonly year = new Date().getFullYear();
-
-  ngOnInit(): void {
-    setTimeout(() => { this.showDemoBadge = true; }, 2000);
-  }
 
   onCodeChange(value: string): void {
     this.code = value.toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -597,30 +586,22 @@ export class LandingComponent implements OnInit {
   }
 
   async onSubmit(): Promise<void> {
-    if (!this.code.trim()) {
+    const code = this.code.trim().toUpperCase();
+    if (!code) {
       this.errorMsg = this.i18n.t('emptyCode');
       this.triggerShake();
       return;
     }
-    const teamMatch = await this.storage.getTeamByCode(this.code);
-    if (!teamMatch) {
+    const found = await this.storage.getTeamByCode(code);
+    if (!found) {
       this.errorMsg = this.i18n.t('invalidCode');
       this.code = '';
       this.triggerShake();
       return;
     }
-    this.router.navigate(['/play', this.code]);
+    this.router.navigate(['/play', code]);
   }
 
-  tryDemo(): void {
-    this.code = 'PARIS1';
-    this.onSubmit();
-  }
-
-  dismissDemo(event: Event): void {
-    event.stopPropagation();
-    this.showDemoBadge = false;
-  }
 
   private triggerShake(): void {
     this.shakeInput = true;
