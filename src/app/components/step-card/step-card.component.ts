@@ -94,6 +94,31 @@ interface MapboxFeature {
           </button>
         </div>
 
+        <!-- ── Vérification de position ── -->
+        <div class="field">
+          <div class="loc-toggle-row">
+            <span class="lbl loc-lbl">📍 Vérification de position requise</span>
+            <label class="toggle">
+              <input type="checkbox"
+                [checked]="step.locationCheck?.enabled ?? false"
+                (change)="toggleLocationCheck()" />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            </label>
+          </div>
+          @if (step.locationCheck?.enabled) {
+            @if (hasAddress) {
+              <p class="loc-hint">
+                Les joueurs devront se trouver à moins de 50 m (marge de tolérance incluse) de
+                cette adresse pour accéder aux énigmes de cette étape.
+              </p>
+            } @else {
+              <p class="loc-warning">
+                ⚠️ Renseignez une adresse ci-dessus pour que la vérification de position fonctionne.
+              </p>
+            }
+          }
+        </div>
+
         <!-- ── Médias (indices visuels pour le joueur) ── -->
         <div class="field">
           <label class="lbl">🖼️ Médias de l'étape</label>
@@ -297,6 +322,39 @@ interface MapboxFeature {
     }
     .btn-pick-map:hover { border-color: var(--color-sky); color: var(--color-sky); opacity: 1; background: rgba(78,205,196,0.06); }
 
+    /* ── Location check ── */
+    .loc-toggle-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    }
+    .loc-lbl { opacity: 1; text-transform: none; font-size: 12px; }
+    .loc-hint {
+      font-family: 'Nunito', sans-serif; font-size: 11px;
+      color: var(--color-ink); opacity: 0.6; margin: 0;
+    }
+    .loc-warning {
+      font-family: 'Nunito', sans-serif; font-weight: 700; font-size: 11px;
+      color: var(--color-coral); margin: 0;
+    }
+    .toggle {
+      position: relative; display: inline-flex; align-items: center;
+      width: 40px; height: 22px; flex-shrink: 0; cursor: pointer;
+    }
+    .toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+    .toggle-track {
+      display: block; width: 40px; height: 22px;
+      background: rgba(45,45,45,0.12);
+      border: 2px solid var(--color-ink); border-radius: 11px;
+      position: relative; transition: background 0.18s;
+    }
+    .toggle input:checked + .toggle-track { background: var(--color-mint); }
+    .toggle-thumb {
+      position: absolute; top: 2px; left: 2px;
+      width: 14px; height: 14px;
+      background: #fff; border: 2px solid var(--color-ink);
+      border-radius: 50%; transition: transform 0.18s;
+    }
+    .toggle input:checked + .toggle-track .toggle-thumb { transform: translateX(18px); }
+
     /* ── Drop zone ── */
     .drop-zone {
       border: 2px dashed rgba(45,45,45,0.28); border-radius: 14px;
@@ -460,6 +518,17 @@ export class StepCardComponent implements OnDestroy {
     this.showDropdown = false;
     this.searching = false;
     this.cdr.markForCheck();
+  }
+
+  // ── Location check ────────────────────────────────────────────────
+
+  get hasAddress(): boolean {
+    return (this.step.lat !== 0 || this.step.lng !== 0) && this.step.address.trim().length > 0;
+  }
+
+  toggleLocationCheck(): void {
+    const enabled = !(this.step.locationCheck?.enabled ?? false);
+    this.patch({ locationCheck: { enabled } });
   }
 
   // ── File upload ───────────────────────────────────────────────────

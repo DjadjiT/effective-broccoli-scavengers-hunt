@@ -27,7 +27,20 @@ import { ModalComponent } from '../../components/modal/modal.component';
 import { ProgressBarComponent } from '../../components/progress-bar/progress-bar.component';
 import { assertFileSize } from '../../lib/media.utils';
 import { MarkdownPipe } from '../../lib/markdown.pipe';
+import {
+  LOCATION_CHECK_RADIUS_METERS,
+  LOCATION_CHECK_TOLERANCE_METERS,
+  haversineDistanceMeters,
+} from '../../lib/geo.utils';
+import { openNavigation } from '../../lib/nav.utils';
 import { RealtimeChannel } from '@supabase/supabase-js';
+
+interface LocationCheckStatus {
+  checking: boolean;
+  allowed: boolean;
+  distance: number | null;
+  error: string;
+}
 
 @Component({
   selector: 'app-play',
@@ -43,6 +56,38 @@ import { RealtimeChannel } from '@supabase/supabase-js';
   ],
   template: `
     <div class="play-page">
+
+      <!-- Location gate — blocks play until geolocation is granted -->
+      @if (locationGateStatus !== 'granted') {
+        <div class="location-gate-overlay">
+          <div class="location-gate-card">
+            <div class="location-gate-icon">📍</div>
+            <h2>Active ta position</h2>
+            <p>
+              Cette chasse au trésor a besoin de ta position pour valider certaines étapes
+              sur le terrain. Active la géolocalisation pour pouvoir jouer.
+            </p>
+            @if (locationGateStatus === 'denied') {
+              <p class="location-gate-error">
+                ⚠️ L'accès à ta position a été refusé. Active-le dans les réglages de ton
+                navigateur, puis réessaie.
+              </p>
+            } @else if (locationGateStatus === 'unsupported') {
+              <p class="location-gate-error">
+                ⚠️ Ton navigateur ne supporte pas la géolocalisation.
+              </p>
+            }
+            <button class="btn-cta" (click)="requestLocationAccess()" [disabled]="locationGateStatus === 'checking'">
+              @if (locationGateStatus === 'checking') {
+                ⏳ Vérification…
+              } @else {
+                📍 Activer ma position
+              }
+            </button>
+          </div>
+        </div>
+      }
+
       <div class="map-full">
         @if (hunt) {
           <app-map
@@ -51,6 +96,7 @@ import { RealtimeChannel } from '@supabase/supabase-js';
             [activeStepIndex]="selectedStepIndex"
             [completedStepIds]="progress?.completedStepIds ?? []"
             [pendingStepIds]="pendingStepIds"
+            [userPosition]="userPosition"
             (markerClick)="onMarkerClick($event)"
           ></app-map>
         }
@@ -245,6 +291,37 @@ import { RealtimeChannel } from '@supabase/supabase-js';
                   </div>
                 }
 
+                @if (step && stepHasGps(step)) {
+                  <div class="step-nav-row">
+                    @if (userPosition && distanceToStep(step) != null) {
+                      <span class="step-nav-dist">📏 {{ formatDistanceMeters(distanceToStep(step)!) }}</span>
+                    } @else {
+                      <span></span>
+                    }
+                    <button class="btn-itinerary" (click)="openItinerary(step)">
+                      🧭 S'y rendre
+                    </button>
+                  </div>
+                }
+
+                @if (step && step.locationCheck?.enabled && !isLocationUnlocked(step)) {
+                  <div class="location-lock">
+                    <span class="lock-icon">🔒</span>
+                    <p class="lock-msg">Rapprochez-vous du lieu demandé pour débloquer cette étape.</p>
+                    @let status = getLocationStatus(step.id);
+                    @if (status?.checking) {
+                      <p class="lock-status">⏳ Vérification de votre position…</p>
+                    } @else if (status?.error) {
+                      <p class="lock-error">{{ status!.error }}</p>
+                    } @else if (status?.distance != null) {
+                      <p class="lock-distance">📏 Distance jusqu'à la zone : ~{{ formatRemainingDistance(status!.distance!) }}</p>
+                    }
+                    <button class="btn-recheck-location" (click)="checkStepLocation(step)" [disabled]="status?.checking">
+                      📍 Vérifier ma position
+                    </button>
+                  </div>
+                } @else {
+
                 <div class="enigma-text md-render" [innerHTML]="enigma?.description | md"></div>
 
                 <!-- Unlocked hints -->
@@ -380,6 +457,7 @@ import { RealtimeChannel } from '@supabase/supabase-js';
 
                 @if (wrongAnswer) {
                   <p class="wrong-msg">❌ {{ i18n.t('wrongAnswer') }}</p>
+                }
                 }
               </div>
             }
@@ -732,6 +810,39 @@ import { RealtimeChannel } from '@supabase/supabase-js';
       color: var(--color-ink); margin: 0;
     }
 
+    /* Location lock */
+    .location-lock {
+      display: flex; flex-direction: column; align-items: center; gap: 8px;
+      padding: 28px 18px;
+      background: rgba(155,93,229,0.07);
+      border: 2px dashed rgba(155,93,229,0.45);
+      border-radius: 16px;
+      text-align: center;
+    }
+    .lock-icon { font-size: 30px; }
+    .lock-msg {
+      font-family: 'Nunito', sans-serif; font-weight: 800; font-size: 14px;
+      color: var(--color-ink); margin: 0;
+    }
+    .lock-status, .lock-distance {
+      font-family: 'Nunito', sans-serif; font-size: 13px;
+      color: var(--color-ink); opacity: 0.7; margin: 0;
+    }
+    .lock-error {
+      font-family: 'Nunito', sans-serif; font-weight: 700; font-size: 13px;
+      color: var(--color-coral); margin: 0;
+    }
+    .btn-recheck-location {
+      margin-top: 4px;
+      background: #9B5DE5; color: #fff;
+      border: 2px solid var(--color-ink); border-radius: 12px;
+      padding: 9px 16px;
+      font-family: 'Nunito', sans-serif; font-weight: 800; font-size: 13px;
+      cursor: pointer; transition: transform 0.12s;
+    }
+    .btn-recheck-location:hover:not(:disabled) { transform: translateY(-1px); }
+    .btn-recheck-location:disabled { opacity: 0.6; cursor: not-allowed; }
+
     /* Answer inputs */
     .answer-row { display: flex; gap: 8px; }
     .answer-row.wrong .answer-input { border-color: var(--color-coral); box-shadow: 3px 3px 0 var(--color-coral); }
@@ -1044,6 +1155,35 @@ import { RealtimeChannel } from '@supabase/supabase-js';
       display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
     }
 
+    /* ── Location gate overlay ── */
+    .location-gate-overlay {
+      position: fixed; inset: 0; z-index: 1500;
+      background: var(--color-paper);
+      display: flex; align-items: center; justify-content: center;
+      padding: 24px;
+    }
+    .location-gate-card {
+      width: 100%; max-width: 420px;
+      display: flex; flex-direction: column; align-items: center; gap: 14px;
+      text-align: center;
+      background: var(--color-cream);
+      border: 3px solid var(--color-ink); border-radius: 20px;
+      box-shadow: 6px 6px 0 var(--color-ink);
+      padding: 32px 24px;
+    }
+    .location-gate-icon { font-size: 48px; }
+    .location-gate-card h2 {
+      font-family: 'Fredoka One', cursive; font-size: 24px; margin: 0; color: var(--color-ink);
+    }
+    .location-gate-card p {
+      font-family: 'Nunito', sans-serif; font-size: 14px; line-height: 1.5;
+      color: var(--color-ink); opacity: 0.75; margin: 0;
+    }
+    .location-gate-error {
+      font-family: 'Nunito', sans-serif; font-weight: 700; font-size: 13px;
+      color: var(--color-coral) !important; opacity: 1 !important;
+    }
+
     /* ── Hunt intro overlay ── */
     .intro-overlay {
       position: fixed; inset: 0; z-index: 1000;
@@ -1324,6 +1464,28 @@ import { RealtimeChannel } from '@supabase/supabase-js';
       box-shadow: 2px 2px 0 var(--color-ink);
     }
 
+    /* ── Step navigation row ── */
+    .step-nav-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      padding: 6px 0;
+    }
+    .step-nav-dist {
+      font-family: 'Nunito', sans-serif; font-weight: 700; font-size: 13px;
+      color: var(--color-ink); opacity: 0.6; white-space: nowrap;
+    }
+    .btn-itinerary {
+      display: flex; align-items: center; gap: 6px;
+      padding: 8px 16px;
+      background: var(--color-sky); color: #fff;
+      border: 2px solid var(--color-ink); border-radius: 12px;
+      font-family: 'Nunito', sans-serif; font-weight: 800; font-size: 13px;
+      cursor: pointer; box-shadow: 2px 2px 0 var(--color-ink);
+      transition: transform 0.1s, box-shadow 0.1s;
+      white-space: nowrap; flex-shrink: 0; margin-left: auto;
+    }
+    .btn-itinerary:hover { transform: translate(-1px,-1px); box-shadow: 3px 3px 0 var(--color-ink); }
+    .btn-itinerary:active { transform: translate(1px,1px); box-shadow: 1px 1px 0 var(--color-ink); }
+
     .stat { font-family: 'Nunito', sans-serif; font-size: 16px; margin: 0 0 8px; }
     .confetti-container { position: fixed; inset: 0; pointer-events: none; z-index: 2000; overflow: hidden; }
     .confetti-piece { position: absolute; width: 10px; height: 10px; border-radius: 2px; animation: confettiFall 1.5s ease-out forwards; }
@@ -1360,6 +1522,7 @@ export class PlayComponent implements OnInit, OnDestroy {
   mediaUrl = '';
 
   wrongAttemptCounts: Map<string, number> = new Map();
+  locationChecks: Map<string, LocationCheckStatus> = new Map();
   pendingSubsByEnigmaId: Map<string, AnswerSubmission> = new Map();
   sessionPendingEnigmaIds: Set<string> = new Set(); // media only — not pre-loaded from storage
   editingPendingEnigmaIds: Set<string> = new Set();
@@ -1393,11 +1556,15 @@ export class PlayComponent implements OnInit, OnDestroy {
   statusSnack = '';
   statusSnackClass = '';
 
+  locationGateStatus: 'checking' | 'granted' | 'denied' | 'unsupported' = 'checking';
+  userPosition: { lat: number; lng: number } | null = null;
+
   private confettiTimer?: ReturnType<typeof setTimeout>;
   private toastTimer?: ReturnType<typeof setTimeout>;
   private countdownInterval?: ReturnType<typeof setInterval>;
   private statusSnackTimer?: ReturnType<typeof setTimeout>;
   private realtimeChannel?: RealtimeChannel;
+  private watchId: number | null = null;
 
   get remaining(): number {
     return (this.hunt?.steps.length ?? 0) - (this.progress?.completedStepIds.length ?? 0);
@@ -1459,6 +1626,93 @@ export class PlayComponent implements OnInit, OnDestroy {
     if (!enigma.hints?.length) return [];
     const attempts = this.wrongAttemptCounts.get(enigma.id) ?? 0;
     return enigma.hints.filter(h => attempts >= h.unlockAfterAttempts);
+  }
+
+  // ── Location check ──────────────────────────────────────────────
+
+  isLocationUnlocked(step: Step | undefined): boolean {
+    if (!step?.locationCheck?.enabled) return true;
+    return this.locationChecks.get(step.id)?.allowed ?? false;
+  }
+
+  getLocationStatus(stepId: string): LocationCheckStatus | undefined {
+    return this.locationChecks.get(stepId);
+  }
+
+  checkStepLocation(step: Step): void {
+    void this.verifyLocation(step);
+  }
+
+  formatRemainingDistance(distanceMeters: number): string {
+    const remaining = Math.max(0, Math.round(distanceMeters - LOCATION_CHECK_RADIUS_METERS));
+    if (remaining === 0) return 'vous y êtes presque';
+    return remaining >= 1000 ? `${(remaining / 1000).toFixed(1)} km` : `${remaining} m`;
+  }
+
+  stepHasGps(step: Step): boolean {
+    return step.lat !== 0 || step.lng !== 0;
+  }
+
+  distanceToStep(step: Step): number | null {
+    if (!this.userPosition) return null;
+    return haversineDistanceMeters(this.userPosition.lat, this.userPosition.lng, step.lat, step.lng);
+  }
+
+  formatDistanceMeters(meters: number): string {
+    if (meters >= 1000) return `${(meters / 1000).toFixed(1)} km`;
+    return `${Math.round(meters)} m`;
+  }
+
+  openItinerary(step: Step): void {
+    openNavigation(this.userPosition, { lat: step.lat, lng: step.lng });
+  }
+
+  private maybeCheckLocation(step: Step | undefined): void {
+    if (!step?.locationCheck?.enabled) return;
+    void this.verifyLocation(step);
+  }
+
+  private async verifyLocation(step: Step): Promise<{ allowed: boolean }> {
+    if (!this.hunt) return { allowed: false };
+
+    this.locationChecks.set(step.id, { checking: true, allowed: false, distance: null, error: '' });
+    this.cdr.markForCheck();
+
+    try {
+      const position = await this.getCurrentPosition();
+      const distance = haversineDistanceMeters(
+        position.coords.latitude, position.coords.longitude, step.lat, step.lng,
+      );
+      const allowed = distance <= LOCATION_CHECK_RADIUS_METERS + LOCATION_CHECK_TOLERANCE_METERS;
+      this.locationChecks.set(step.id, {
+        checking: false,
+        allowed,
+        distance,
+        error: '',
+      });
+      return { allowed };
+    } catch {
+      this.locationChecks.set(step.id, {
+        checking: false,
+        allowed: false,
+        distance: null,
+        error: "Impossible d'obtenir votre position. Activez la géolocalisation et réessayez.",
+      });
+      return { allowed: false };
+    } finally {
+      this.cdr.markForCheck();
+    }
+  }
+
+  private getCurrentPosition(): Promise<GeolocationPosition> {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) { reject(new Error('no_geolocation')); return; }
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
+      });
+    });
   }
 
   isEnigmaPending(enigmaId: string, type = ''): boolean {
@@ -1524,7 +1778,45 @@ export class PlayComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     const code = this.route.snapshot.paramMap.get('code') ?? '';
+    this.requestLocationAccess();
     this.initPlay(code);
+  }
+
+  requestLocationAccess(): void {
+    if (!navigator.geolocation) {
+      this.locationGateStatus = 'unsupported';
+      this.cdr.markForCheck();
+      return;
+    }
+
+    this.locationGateStatus = 'checking';
+    this.cdr.markForCheck();
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        this.locationGateStatus = 'granted';
+        this.userPosition = { lat: position.coords.latitude, lng: position.coords.longitude };
+        this.startWatchingPosition();
+        this.cdr.markForCheck();
+      },
+      () => {
+        this.locationGateStatus = 'denied';
+        this.cdr.markForCheck();
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+    );
+  }
+
+  private startWatchingPosition(): void {
+    if (this.watchId != null || !navigator.geolocation) return;
+    this.watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        this.userPosition = { lat: position.coords.latitude, lng: position.coords.longitude };
+        this.cdr.markForCheck();
+      },
+      () => { /* keep last known position on transient errors */ },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 },
+    );
   }
 
   private async initPlay(code: string): Promise<void> {
@@ -1682,6 +1974,7 @@ export class PlayComponent implements OnInit, OnDestroy {
     if (this.countdownInterval) clearInterval(this.countdownInterval);
     if (this.statusSnackTimer) clearTimeout(this.statusSnackTimer);
     if (this.mediaPreviewUrl) URL.revokeObjectURL(this.mediaPreviewUrl);
+    if (this.watchId != null) navigator.geolocation?.clearWatch(this.watchId);
     this.realtimeChannel?.unsubscribe();
   }
 
@@ -1715,6 +2008,7 @@ export class PlayComponent implements OnInit, OnDestroy {
       this.currentEnigmaIndex = 0;
     }
     this.resetAnswerState();
+    this.maybeCheckLocation(step);
     this.sheetExpanded = false;
     this.mapRef?.flyToStep(index);
   }
@@ -1784,6 +2078,11 @@ export class PlayComponent implements OnInit, OnDestroy {
     if (!step) return;
     const enigma = step.enigmas?.[this.currentEnigmaIndex];
     if (!enigma) return;
+
+    if (step.locationCheck?.enabled) {
+      const { allowed } = await this.verifyLocation(step);
+      if (!allowed) { this.cdr.markForCheck(); return; }
+    }
 
     if (enigma.answer.type === 'text' && !this.answerInput.trim()) return;
     if ((enigma.answer.type === 'checkbox' || enigma.answer.type === 'radio') && this.selectedOptionIds.length === 0) return;
