@@ -33,6 +33,10 @@ export interface Hint {
   unlockAfterAttempts: number;
 }
 
+export interface LocationCheck {
+  enabled: boolean;
+}
+
 export interface Enigma {
   id: string;
   title: string;
@@ -50,6 +54,7 @@ export interface Step {
   lng: number;
   enigmas: Enigma[];
   media: StepMedia[];
+  locationCheck?: LocationCheck;
 }
 
 export type HuntStatus = 'draft' | 'ready' | 'started' | 'finished';

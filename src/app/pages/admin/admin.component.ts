@@ -199,6 +199,7 @@ import { environment } from '../../../environments/environment';
                   [activeStepIndex]="activeStep"
                   [completedStepIds]="[]"
                   [pickMode]="pickModeStepIndex !== null"
+                  [locationCheckStepIds]="locationCheckStepIds"
                   (mapClick)="onMapClick($event)"
                   (markerClick)="goToStep($event)"
                 ></app-map>
@@ -639,6 +640,12 @@ export class AdminComponent implements OnInit {
   hunt: Hunt = this.huntService.createEmptyHunt('');
   activeStep = 0;
   pickModeStepIndex: number | null = null;
+
+  get locationCheckStepIds(): string[] {
+    return this.hunt.steps
+      .filter(s => s.locationCheck?.enabled)
+      .map(s => s.id);
+  }
   showPublishModal = false;
   showSaveSnack = false;
   showPublishSnack = false;
